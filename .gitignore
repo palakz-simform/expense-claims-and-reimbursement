@@ -1,0 +1,18 @@
+# Personal build notes
+STEPS.md
+
+# Dependencies and build output
+node_modules/
+dist/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Uploaded receipts
+uploads/
+
+# Misc
+.DS_Store
+*.log
