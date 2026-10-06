@@ -1,7 +1,6 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
+// Expense Claims & Reimbursement schema.
+// Rules that live in the migration SQL, not here (Phase 4): CHECK constraints
+// (amount > 0, level >= 1, chainVersion >= 1) and the triggers that lock approved claims.
 
 generator client {
   provider = "prisma-client"
@@ -10,4 +9,176 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  CLAIMANT
+  APPROVER
+  FINANCE
+}
+
+// Claim lifecycle: DRAFT -> PENDING_APPROVAL -> APPROVED, or PENDING_APPROVAL -> REJECTED -> (resubmit) -> PENDING_APPROVAL
+enum ClaimStatus {
+  DRAFT
+  PENDING_APPROVAL
+  REJECTED
+  APPROVED
+}
+
+// State of one approver's step in a chain.
+// WAITING = earlier level not decided yet; PENDING = this approver's turn; INVALIDATED = chain was reset or claim rejected.
+enum ApprovalStatus {
+  WAITING
+  PENDING
+  APPROVED
+  REJECTED
+  INVALIDATED
+}
+
+enum Category {
+  TRAVEL
+  ACCOMMODATION
+  MEALS
+  TRANSPORT
+  OFFICE_SUPPLIES
+  OTHER
+}
+
+enum AuditAction {
+  CLAIM_CREATED
+  CLAIM_UPDATED
+  CLAIM_SUBMITTED
+  APPROVAL_GRANTED
+  CLAIM_APPROVED
+  CLAIM_REJECTED
+  CLAIM_RESUBMITTED
+  APPROVAL_CHAIN_RESET
+  RECEIPT_ADDED
+  RECEIPT_REMOVED
+}
+
+// ---------------------------------------------------------------------------
+// User
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String   @id @default(uuid(7)) @db.Uuid // UUIDs are not guessable/enumerable, unlike sequential ids
+  email         String   @unique
+  passwordHash  String
+  name          String
+  role          Role
+  approvalLevel Int? // only for APPROVER (1 or 2); CHECK added in migration
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  claims         Claim[]
+  approvals      Approval[]
+  historyEntries ClaimHistory[]
+}
+
+// ---------------------------------------------------------------------------
+// Claim (note: there is deliberately NO total column; total = SUM(LineItem.amount))
+// ---------------------------------------------------------------------------
+
+model Claim {
+  id                     String      @id @default(uuid(7)) @db.Uuid
+  claimNumber            Int         @unique @default(autoincrement()) // human-friendly number for display and export
+  claimantId             String      @db.Uuid
+  title                  String
+  status                 ClaimStatus @default(DRAFT)
+  currentApprovalVersion Int         @default(0) // chainVersion of the live approval chain; 0 = never submitted
+  submittedAt            DateTime?
+  approvedAt             DateTime? // final approval time; defines the finance export period
+  createdAt              DateTime    @default(now())
+  updatedAt              DateTime    @updatedAt
+
+  claimant  User           @relation(fields: [claimantId], references: [id], onDelete: Restrict)
+  lineItems LineItem[]
+  approvals Approval[]
+  history   ClaimHistory[]
+
+  @@index([claimantId, status]) // claimant's own list filtered by status
+  @@index([status, approvedAt]) // finance export: APPROVED within a date range
+  @@index([status, submittedAt]) // finance/approver lists filtered by status and submitted date
+}
+
+// ---------------------------------------------------------------------------
+// LineItem and Receipt
+// ---------------------------------------------------------------------------
+
+model LineItem {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  claimId     String   @db.Uuid
+  date        DateTime @db.Date
+  category    Category
+  amount      Decimal  @db.Decimal(12, 2) // exact decimal, never a float; positive CHECK added in migration
+  description String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  claim    Claim     @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  receipts Receipt[]
+
+  @@index([claimId]) // load a claim's items and compute its total
+}
+
+model Receipt {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  lineItemId   String   @db.Uuid
+  originalName String // shown to the user only; never used as a file path
+  storedName   String   @unique // random name on disk
+  mimeType     String
+  sizeBytes    Int
+  uploadedAt   DateTime @default(now())
+
+  // Restrict: deleting a line item that still has receipts fails, so files on disk are never orphaned silently
+  lineItem LineItem @relation(fields: [lineItemId], references: [id], onDelete: Restrict)
+
+  @@index([lineItemId])
+}
+
+// ---------------------------------------------------------------------------
+// Approval (one row per level per chain version)
+// ---------------------------------------------------------------------------
+
+model Approval {
+  id           String         @id @default(uuid(7)) @db.Uuid
+  claimId      String         @db.Uuid
+  chainVersion Int // increments each time the chain is rebuilt (submit, resubmit, amount change)
+  level        Int // 1 or 2; CHECK level >= 1 added in migration
+  approverId   String         @db.Uuid
+  status       ApprovalStatus @default(WAITING)
+  decidedAt    DateTime?
+  reason       String? // required by the service on rejection
+  createdAt    DateTime       @default(now())
+
+  claim    Claim @relation(fields: [claimId], references: [id], onDelete: Restrict)
+  approver User  @relation(fields: [approverId], references: [id], onDelete: Restrict)
+
+  // One approver slot per level per chain; this unique index also serves lookups by (claimId, chainVersion) via its left prefix
+  @@unique([claimId, chainVersion, level])
+  @@index([approverId, status]) // an approver's queue
+}
+
+// ---------------------------------------------------------------------------
+// ClaimHistory (append-only audit trail)
+// ---------------------------------------------------------------------------
+
+model ClaimHistory {
+  id            String      @id @default(uuid(7)) @db.Uuid
+  claimId       String      @db.Uuid
+  action        AuditAction
+  performedById String      @db.Uuid
+  reason        String?
+  metadata      Json? // structured details, e.g. { total, levels, chainVersion } or old/new totals
+  createdAt     DateTime    @default(now())
+
+  claim       Claim @relation(fields: [claimId], references: [id], onDelete: Restrict)
+  performedBy User  @relation(fields: [performedById], references: [id], onDelete: Restrict)
+
+  @@index([claimId, createdAt]) // a claim's timeline, in order
 }
