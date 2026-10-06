@@ -5,6 +5,9 @@ STEPS.md
 node_modules/
 dist/
 
+# Generated Prisma client (rebuilt by `prisma generate`)
+backend/src/generated/
+
 # Secrets
 .env
 .env.*
