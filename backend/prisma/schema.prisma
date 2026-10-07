@@ -78,6 +78,10 @@ model User {
   claims         Claim[]
   approvals      Approval[]
   historyEntries ClaimHistory[]
+
+  // As a claimant: who approves my claims at each level. As an approver: whose claims I am assigned to.
+  assignedApprovers ApproverAssignment[] @relation("AssignmentClaimant")
+  assignedClaimants ApproverAssignment[] @relation("AssignmentApprover")
 }
 
 // ---------------------------------------------------------------------------
@@ -162,6 +166,29 @@ model Approval {
   // One approver slot per level per chain; this unique index also serves lookups by (claimId, chainVersion) via its left prefix
   @@unique([claimId, chainVersion, level])
   @@index([approverId, status]) // an approver's queue
+}
+
+// ---------------------------------------------------------------------------
+// ApproverAssignment (who approves a claimant's claims at each level)
+// ---------------------------------------------------------------------------
+
+// One row per (claimant, level). The number of levels is data, not schema: adding a level 3 means
+// inserting rows with level = 3 and adding a tier to the approval policy, with no migration.
+// The chain is built from these rows at submit time and copied onto Approval rows (snapshot),
+// so changing an assignment later never affects claims already in flight.
+model ApproverAssignment {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  claimantId String   @db.Uuid
+  level      Int // 1..N; CHECK level >= 1 added in migration
+  approverId String   @db.Uuid
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  claimant User @relation("AssignmentClaimant", fields: [claimantId], references: [id], onDelete: Restrict)
+  approver User @relation("AssignmentApprover", fields: [approverId], references: [id], onDelete: Restrict)
+
+  @@unique([claimantId, level]) // exactly one approver per level per claimant; also serves lookups by claimant
+  @@index([approverId]) // find an approver's assignments (reassignment when an approver leaves)
 }
 
 // ---------------------------------------------------------------------------
