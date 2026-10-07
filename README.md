@@ -30,7 +30,7 @@ Each user has one role. Approvers also have an `approvalLevel` (1 or 2).
 - **Claim total is derived.** There is no stored total; it is `SUM(lineItem.amount)`, so it cannot drift from the line items. Amounts use `Decimal(12,2)`.
 - **Receipts are attached per line item, not per claim** (the brief allows either; this is our documented choice). A line item can have zero or more receipts; a receipt is optional and is not required to submit. Why per line item: each receipt proves one specific expense, so approvers and finance can trace an amount to its evidence, and the approved-claim lock triggers apply at the same level as the amounts they protect.
 - **Status flow:** `DRAFT -> PENDING_APPROVAL -> APPROVED`, or `PENDING_APPROVAL -> REJECTED -> (edit, resubmit) -> PENDING_APPROVAL`. `APPROVED` is terminal and read-only.
-- **Approval routing:** total under ₹10,000 needs 1 approval; ₹10,000 or more needs 2 (level 1, then level 2).
+- **Approval routing (N levels):** the number of required levels comes from an ordered list of amount tiers in `lib/approvalPolicy.ts` (currently: from ₹0 level 1; from ₹10,000 levels 1 and 2). Each claimant has a fixed approver per level in `ApproverAssignment` (one row per claimant and level, set up by the seed because there is no admin UI). On submit, the chain is built by looping over `1..requiredLevels` and copying the claimant's assigned approver for each level onto an `Approval` row, so assignment changes later never affect claims already in flight. Adding a level 3 means one new tier in the policy plus assignment rows, with no schema change. If a claimant has no approver at a required level, submit fails with `422 NO_APPROVER_AVAILABLE`.
 - **Amount change during approval:** any change to the total invalidates the current chain, increments `chainVersion`, and builds a new chain. The same approver is kept per level where possible. Old approval records are kept for audit.
 - **Approved claims are locked** in the service layer and by PostgreSQL triggers on line items and receipts.
 - **Audit trail:** every state change writes a `ClaimHistory` row in the same transaction.
@@ -45,6 +45,7 @@ Each user has one role. Approvers also have an `approvalLevel` (1 or 2).
 | Approval no longer pending | 409 `APPROVAL_NOT_PENDING` |
 | Editing an approved claim | 409 `CLAIM_LOCKED` |
 | Submitting with no line items | 422 `NO_LINE_ITEMS` |
+| Claimant has no approver at a required level | 422 `NO_APPROVER_AVAILABLE` |
 
 ## Project layout
 
