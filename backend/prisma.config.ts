@@ -14,6 +14,8 @@ export default defineConfig({
   // Where generated migration files are stored
   migrations: {
     path: "prisma/migrations",
+    // Command run by `npx prisma db seed`
+    seed: "tsx prisma/seed.ts",
   },
   // Direct (non-pooled) Neon connection, required for running migrations
   datasource: {

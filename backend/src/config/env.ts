@@ -9,6 +9,9 @@ const envSchema = z.object({
   // Pooled Neon connection used by the running app (Prisma pg adapter).
   // DATABASE_URL (direct) is only read by the Prisma CLI, so it is not validated here.
   DATABASE_URL_POOLED: z.url("DATABASE_URL_POOLED must be a valid connection URL"),
+  // Password given to every seeded user. Only the seed script needs it, so it is optional here
+  // (the app must still boot in production, where it is not set).
+  SEED_PASSWORD: z.string().min(8, "SEED_PASSWORD must be at least 8 characters").optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
