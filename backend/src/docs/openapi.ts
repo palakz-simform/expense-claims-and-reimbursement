@@ -15,7 +15,10 @@ const bearerAuth = registry.registerComponent("securitySchemes", "bearerAuth", {
 });
 
 // --- Shared response shapes ---
-const errorSchema = z.object({ error: z.object({ code: z.string(), message: z.string() }) });
+// `requestId` matches the X-Request-Id response header and the server log line for that request.
+const errorSchema = z.object({
+  error: z.object({ code: z.string(), message: z.string(), requestId: z.string().optional() }),
+});
 
 const userSchema = z.object({
   id: z.string(),

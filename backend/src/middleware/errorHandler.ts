@@ -1,40 +1,38 @@
 import type { ErrorRequestHandler, RequestHandler } from "express";
 import { ZodError } from "zod";
 import { AppError } from "../lib/AppError";
-import { logger } from "../lib/logger";
 
-// Unknown routes get the same error shape as everything else
+// Unknown routes use the same error shape as everything else
 export const notFoundHandler: RequestHandler = (_req, _res, next) => {
   next(new AppError(404, "NOT_FOUND", "Route not found"));
 };
 
-// The single place every error ends up (Express 5 forwards rejected async handlers here too).
-// Clients only ever see { error: { code, message } }; stack traces and Prisma errors stay in the logs.
-export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
-  // Errors we threw on purpose
+// Every error ends up here. Clients only see { error: { code, message, requestId } }.
+// Concept: expected errors (AppError, 4xx) vs unexpected errors (bugs, 500).
+export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
+  // Builds every response body so they all have the same shape; requestId links it to the log line
+  const send = (status: number, code: string, message: string) =>
+    res.status(status).json({ error: { code, message, requestId: req.id } });
+
+  // Expected: thrown on purpose
   if (err instanceof AppError) {
-    res.status(err.status).json({ error: { code: err.code, message: err.message } });
+    send(err.status, err.code, err.message);
     return;
   }
 
-  // Request body failed Zod validation
+  // Expected: body failed Zod validation
   if (err instanceof ZodError) {
-    res.status(400).json({
-      error: {
-        code: "VALIDATION_ERROR",
-        message: err.issues.map((i) => `${i.path.join(".") || "body"}: ${i.message}`).join("; "),
-      },
-    });
+    send(400, "VALIDATION_ERROR", err.issues.map((i) => `${i.path.join(".") || "body"}: ${i.message}`).join("; "));
     return;
   }
 
-  // Malformed JSON body (thrown by express.json)
+  // Expected: malformed JSON (thrown by express.json)
   if (err?.type === "entity.parse.failed") {
-    res.status(400).json({ error: { code: "INVALID_JSON", message: "Request body is not valid JSON" } });
+    send(400, "INVALID_JSON", "Request body is not valid JSON");
     return;
   }
 
-  // Anything else is a bug: log it (with the stack), but never leak details to the client
-  logger.error({ err }, "Unhandled error");
-  res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Something went wrong" } });
+  // Unexpected: the request's log line records the stack; the client gets a generic message
+  res.err = err instanceof Error ? err : new Error(String(err));
+  send(500, "INTERNAL_ERROR", "Something went wrong");
 };
