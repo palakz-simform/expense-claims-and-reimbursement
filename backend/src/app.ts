@@ -6,9 +6,14 @@ import { createDocsRouter } from "./docs/swagger";
 import { globalLimiter } from "./middleware/rateLimit";
 import { authenticate } from "./middleware/authenticate";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
+import { requestLogger } from "./middleware/requestLogger";
 import { authProtectedRouter, authPublicRouter } from "./modules/auth/auth.routes";
 
 const app = express();
+
+// First of all: give the request an ID and log it when it finishes, so even requests that are
+// rejected later (rate limited, unauthenticated, invalid) are logged with their ID
+app.use(requestLogger);
 
 // API docs (Swagger UI). Mounted BEFORE helmet because helmet's default CSP blocks Swagger UI's
 // inline scripts, and BEFORE authenticate so the docs load without a token (use "Authorize" in the UI).

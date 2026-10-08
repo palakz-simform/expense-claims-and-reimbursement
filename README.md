@@ -36,6 +36,12 @@ Each user has one role. Approvers also have an `approvalLevel` (1 or 2).
 - **Audit trail:** every state change writes a `ClaimHistory` row in the same transaction.
 - **Visibility is enforced in queries.** An approver requesting a claim outside their queue gets `404`.
 
+## Logging and request IDs
+
+- Logs are structured JSON via `pino` (readable colours in development). `LOG_LEVEL` sets the minimum level (default `info`). Passwords, tokens and the `Authorization` header are redacted.
+- Every request gets a generated ID, returned in the `X-Request-Id` response header.
+- One log line per request when it finishes: method, URL, status, duration and request ID. Level follows the outcome: `info` (2xx/3xx), `warn` (4xx), `error` (5xx). `/health` is not logged.
+
 ## Error codes (so far)
 
 | Case | Response |
