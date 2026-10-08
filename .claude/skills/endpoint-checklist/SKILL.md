@@ -27,5 +27,8 @@ Review `$ARGUMENTS` (or the endpoints changed in the current diff) against this 
 - No stack traces, Prisma errors, password hashes or tokens in responses or logs.
 - Select only the columns needed (no N+1, no `passwordHash`).
 
+**API docs**
+- Path, request body (reuse the Zod schema) and every response code registered in `backend/src/docs/openapi.ts` (`registry.registerPath`). Docs are hand-written and do not update themselves.
+
 **Tests**
 - Note which test covers it; the two mandatory ones are approver-by-ID isolation and total-cannot-desync.

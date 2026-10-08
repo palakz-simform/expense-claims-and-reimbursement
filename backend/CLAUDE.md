@@ -40,6 +40,10 @@ Run commands from `backend/`.
 - **CSV export:** escape quotes/commas/newlines and prefix `= + - @` cells. Concept: *CSV/formula injection*.
 - **Secrets:** `JWT_SECRET` at least 16 chars (aim for 32+ random); never log tokens, passwords or connection strings.
 
+## API docs (Swagger)
+- Swagger UI at `/docs`, spec at `/openapi.json`, built in `src/docs/openapi.ts`; disabled in production.
+- **Every new or changed endpoint must also be registered/updated in `src/docs/openapi.ts`** (`registry.registerPath`): reuse the Zod schema for the request, list each response code. Response docs are hand-written and do not update themselves.
+
 ## Data integrity
 - **Money:** `Decimal(12,2)` in the DB, Prisma `Decimal` in code; never JS `number` for amounts. Concept: *floating-point error*.
 - **Derived total:** no stored total; compute with SQL aggregate (`_sum`). Concept: *single source of truth / no denormalisation*.

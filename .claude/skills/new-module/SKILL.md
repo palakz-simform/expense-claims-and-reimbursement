@@ -31,4 +31,5 @@ Shared by two or more modules goes in `lib/` or `middleware/`; used by one modul
 
 ## Wiring
 - Mount the router in `src/app.ts` **below** `app.use(authenticate)` so it is protected by default.
+- Register each route in `src/docs/openapi.ts` with `registry.registerPath` (reuse the Zod schema for the request, list every response code) so Swagger stays in sync.
 - Run `npx tsc --noEmit` from `backend/` and fix any errors.
