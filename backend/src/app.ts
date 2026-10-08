@@ -1,12 +1,21 @@
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import { env } from "./config/env";
+import { createDocsRouter } from "./docs/swagger";
 import { globalLimiter } from "./middleware/rateLimit";
 import { authenticate } from "./middleware/authenticate";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import { authProtectedRouter, authPublicRouter } from "./modules/auth/auth.routes";
 
 const app = express();
+
+// API docs (Swagger UI). Mounted BEFORE helmet because helmet's default CSP blocks Swagger UI's
+// inline scripts, and BEFORE authenticate so the docs load without a token (use "Authorize" in the UI).
+// Disabled in production: a deliberate public exception to deny-by-default, so only expose it in dev.
+if (env.NODE_ENV !== "production") {
+  app.use(createDocsRouter());
+}
 
 // Middleware
 app.use(helmet()); // sets secure HTTP headers
