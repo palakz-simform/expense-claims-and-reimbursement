@@ -1,6 +1,7 @@
 import type { ErrorRequestHandler, RequestHandler } from "express";
 import { ZodError } from "zod";
 import { AppError } from "../lib/AppError";
+import { logger } from "../lib/logger";
 
 // Unknown routes get the same error shape as everything else
 export const notFoundHandler: RequestHandler = (_req, _res, next) => {
@@ -33,7 +34,7 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
     return;
   }
 
-  // Anything else is a bug: log it, but never leak details to the client
-  console.error(err);
+  // Anything else is a bug: log it (with the stack), but never leak details to the client
+  logger.error({ err }, "Unhandled error");
   res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Something went wrong" } });
 };
