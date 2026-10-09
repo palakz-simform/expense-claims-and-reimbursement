@@ -36,6 +36,16 @@ Each user has one role. Approvers also have an `approvalLevel` (1 or 2).
 - **Audit trail:** every state change writes a `ClaimHistory` row in the same transaction.
 - **Visibility is enforced in queries.** An approver requesting a claim outside their queue gets `404`.
 
+## Logging and request IDs
+
+- Logs are structured JSON via `pino` (readable colours in development). `LOG_LEVEL` sets the minimum level (default `info`). Passwords, tokens and the `Authorization` header are redacted.
+- Every request gets a generated ID, returned in the `X-Request-Id` response header.
+- One log line per request when it finishes: method, URL, status, duration and request ID. Level follows the outcome: `info` (2xx/3xx), `warn` (4xx), `error` (5xx). `/health` is not logged.
+- Every error response has the same shape, `{ "error": { "code", "message", "requestId" } }`. `requestId` equals the `X-Request-Id` header, so a user can quote it and you can find that request's log line.
+- Invalid input (`400 VALIDATION_ERROR`) also has `details`: one `{ in, path, message }` per bad field (`in` is `body`, `query` or `params`), so a form can mark the right input. Schemas are `.strict()`, so unknown fields are rejected too.
+- Expected errors (our rules, 4xx) return their own code. Unexpected errors (bugs) always return a generic `500 INTERNAL_ERROR`; the message and stack trace appear only on that request's log line, never in the response.
+- On `SIGTERM` or `SIGINT` the server stops taking new requests, lets running ones finish, closes the database connection and exits (forced after 10 seconds). An unhandled rejection or uncaught exception is logged as `fatal`, then the process shuts down with exit code 1.
+
 ## Error codes (so far)
 
 | Case | Response |
@@ -43,7 +53,8 @@ Each user has one role. Approvers also have an `approvalLevel` (1 or 2).
 | Claim outside my visibility | 404 |
 | Approve/reject outside my queue | 403 `NOT_YOUR_APPROVAL` |
 | Approval no longer pending | 409 `APPROVAL_NOT_PENDING` |
-| Editing an approved claim | 409 `CLAIM_LOCKED` |
+| Editing an approved claim | 409 `CLAIM_LOCKED` (also raised by the database trigger as a backstop) |
+| A value that must be unique already exists | 409 `CONFLICT` |
 | Submitting with no line items | 422 `NO_LINE_ITEMS` |
 | Claimant has no approver at a required level | 422 `NO_APPROVER_AVAILABLE` |
 
