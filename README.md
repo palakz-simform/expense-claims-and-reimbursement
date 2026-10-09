@@ -44,6 +44,7 @@ Each user has one role. Approvers also have an `approvalLevel` (1 or 2).
 - Every error response has the same shape, `{ "error": { "code", "message", "requestId" } }`. `requestId` equals the `X-Request-Id` header, so a user can quote it and you can find that request's log line.
 - Invalid input (`400 VALIDATION_ERROR`) also has `details`: one `{ in, path, message }` per bad field (`in` is `body`, `query` or `params`), so a form can mark the right input. Schemas are `.strict()`, so unknown fields are rejected too.
 - Expected errors (our rules, 4xx) return their own code. Unexpected errors (bugs) always return a generic `500 INTERNAL_ERROR`; the message and stack trace appear only on that request's log line, never in the response.
+- On `SIGTERM` or `SIGINT` the server stops taking new requests, lets running ones finish, closes the database connection and exits (forced after 10 seconds). An unhandled rejection or uncaught exception is logged as `fatal`, then the process shuts down with exit code 1.
 
 ## Error codes (so far)
 
