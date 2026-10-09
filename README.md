@@ -52,7 +52,8 @@ Each user has one role. Approvers also have an `approvalLevel` (1 or 2).
 | Claim outside my visibility | 404 |
 | Approve/reject outside my queue | 403 `NOT_YOUR_APPROVAL` |
 | Approval no longer pending | 409 `APPROVAL_NOT_PENDING` |
-| Editing an approved claim | 409 `CLAIM_LOCKED` |
+| Editing an approved claim | 409 `CLAIM_LOCKED` (also raised by the database trigger as a backstop) |
+| A value that must be unique already exists | 409 `CONFLICT` |
 | Submitting with no line items | 422 `NO_LINE_ITEMS` |
 | Claimant has no approver at a required level | 422 `NO_APPROVER_AVAILABLE` |
 

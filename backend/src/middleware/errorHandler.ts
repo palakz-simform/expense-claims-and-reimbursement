@@ -1,5 +1,6 @@
 import type { ErrorRequestHandler, RequestHandler } from "express";
 import { AppError, type ValidationDetail } from "../lib/AppError";
+import { mapDatabaseError } from "../lib/prismaErrors";
 
 // Unknown routes use the same error shape as everything else
 export const notFoundHandler: RequestHandler = (_req, _res, next) => {
@@ -13,9 +14,10 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
   const send = (status: number, code: string, message: string, details?: ValidationDetail[]) =>
     res.status(status).json({ error: { code, message, details, requestId: req.id } });
 
-  // Expected: thrown on purpose (includes validation errors from validate())
-  if (err instanceof AppError) {
-    send(err.status, err.code, err.message, err.details);
+  // Expected: thrown on purpose (includes validation errors) or a known database failure
+  const expected = err instanceof AppError ? err : mapDatabaseError(err);
+  if (expected) {
+    send(expected.status, expected.code, expected.message, expected.details);
     return;
   }
 
