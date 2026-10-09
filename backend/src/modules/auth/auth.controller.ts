@@ -1,10 +1,10 @@
 import type { Request, Response } from "express";
-import { loginSchema } from "./auth.schemas";
+import type { LoginInput } from "./auth.schemas";
 import * as authService from "./auth.service";
 
-// POST /auth/login: validate the body, delegate to the service
+// POST /auth/login: the body was already validated and cleaned by validate({ body: loginSchema })
 export async function login(req: Request, res: Response) {
-  const input = loginSchema.parse(req.body);
+  const input: LoginInput = req.body;
   res.json(await authService.login(input));
 }
 

@@ -16,8 +16,16 @@ const bearerAuth = registry.registerComponent("securitySchemes", "bearerAuth", {
 
 // --- Shared response shapes ---
 // `requestId` matches the X-Request-Id response header and the server log line for that request.
+// `details` appears on validation errors only: one entry per invalid field.
 const errorSchema = z.object({
-  error: z.object({ code: z.string(), message: z.string(), requestId: z.string().optional() }),
+  error: z.object({
+    code: z.string(),
+    message: z.string(),
+    requestId: z.string().optional(),
+    details: z
+      .array(z.object({ in: z.enum(["body", "query", "params"]), path: z.string(), message: z.string() }))
+      .optional(),
+  }),
 });
 
 const userSchema = z.object({
