@@ -35,6 +35,7 @@ Each user has one role. Approvers also have an `approvalLevel` (1 or 2).
 - **Approved claims are locked** in the service layer and by PostgreSQL triggers on line items and receipts.
 - **Audit trail:** every state change writes a `ClaimHistory` row in the same transaction.
 - **Visibility is enforced in queries.** An approver requesting a claim outside their queue gets `404`.
+- **Only drafts can be deleted.** A draft was never submitted, so `DELETE /claims/:id` removes it together with its line items and its own history. A submitted claim (pending, rejected or approved) is never deleted: its history and approvals are the audit trail finance may need in a dispute. Only the `title` of a claim can be edited (`PATCH /claims/:id`); the total is derived and the status follows the workflow.
 - **Lists are paginated, never loaded whole.** `GET /claims?page=1&pageSize=20` (`pageSize` at most 100) returns `{ data, pagination: { page, pageSize, totalItems, totalPages } }`, newest first; list items have the computed `total` and `lineItemCount` but no line items. Totals for a page come from one grouped query.
 
 ## Logging and request IDs
@@ -55,6 +56,9 @@ Each user has one role. Approvers also have an `approvalLevel` (1 or 2).
 | Approve/reject outside my queue | 403 `NOT_YOUR_APPROVAL` |
 | Approval no longer pending | 409 `APPROVAL_NOT_PENDING` |
 | Editing an approved claim | 409 `CLAIM_LOCKED` (also raised by the database trigger as a backstop) |
+| Editing a claim that is awaiting approval (until the chain-reset phase) | 409 `CLAIM_NOT_EDITABLE` |
+| Adding a line item to a claim that already has 100 | 422 `LINE_ITEM_LIMIT_REACHED` |
+| Deleting a claim that was already submitted (pending or rejected) | 409 `CLAIM_NOT_DELETABLE` (an approved one is 409 `CLAIM_LOCKED`) |
 | A value that must be unique already exists | 409 `CONFLICT` |
 | Submitting with no line items | 422 `NO_LINE_ITEMS` |
 | Claimant has no approver at a required level | 422 `NO_APPROVER_AVAILABLE` |

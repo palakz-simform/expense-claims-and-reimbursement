@@ -2,6 +2,9 @@ import { z } from "zod";
 import { Prisma } from "../../generated/prisma/client";
 import { Category } from "../../generated/prisma/enums";
 
+// Most line items one claim can have (also enforced when adding a single item)
+export const MAX_LINE_ITEMS = 100;
+
 // One expense line. .strict() rejects unknown keys such as `total` or `claimId` (mass-assignment protection).
 export const lineItemSchema = z
   .object({
@@ -25,16 +28,30 @@ export const lineItemSchema = z
   })
   .strict();
 
+// A claim's title
+const titleSchema = z.string().trim().min(1, "Title is required").max(200);
+
 // POST /claims: a title and 0..100 line items. There is deliberately no total field.
 export const createClaimSchema = z
   .object({
-    title: z.string().trim().min(1, "Title is required").max(200),
-    lineItems: z.array(lineItemSchema).max(100).default([]),
+    title: titleSchema,
+    lineItems: z.array(lineItemSchema).max(MAX_LINE_ITEMS).default([]),
   })
   .strict();
 
+// PATCH /claims/:id: only the title can be edited (the total is derived, the status follows the workflow)
+export const updateClaimSchema = z.object({ title: titleSchema }).strict();
+
+// PATCH /claims/:id/line-items/:itemId: only the fields that change, at least one
+export const updateLineItemSchema = lineItemSchema
+  .partial()
+  .refine((changes) => Object.keys(changes).length > 0, "At least one field is required");
+
 // /claims/:id
 export const claimIdParamsSchema = z.object({ id: z.uuid() }).strict();
+
+// /claims/:id/line-items/:itemId
+export const lineItemParamsSchema = z.object({ id: z.uuid(), itemId: z.uuid() }).strict();
 
 // GET /claims: page number and page size (capped at 100). Query strings arrive as text, so coerce to numbers.
 export const listClaimsQuerySchema = z
@@ -46,3 +63,6 @@ export const listClaimsQuerySchema = z
 
 export type CreateClaimInput = z.infer<typeof createClaimSchema>;
 export type ListClaimsQuery = z.infer<typeof listClaimsQuerySchema>;
+export type LineItemInput = z.infer<typeof lineItemSchema>;
+export type UpdateClaimInput = z.infer<typeof updateClaimSchema>;
+export type UpdateLineItemInput = z.infer<typeof updateLineItemSchema>;
