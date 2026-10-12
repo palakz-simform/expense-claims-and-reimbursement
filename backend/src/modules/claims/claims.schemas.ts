@@ -36,4 +36,13 @@ export const createClaimSchema = z
 // /claims/:id
 export const claimIdParamsSchema = z.object({ id: z.uuid() }).strict();
 
+// GET /claims: page number and page size (capped at 100). Query strings arrive as text, so coerce to numbers.
+export const listClaimsQuerySchema = z
+  .object({
+    page: z.coerce.number().int().min(1).default(1),
+    pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  })
+  .strict();
+
 export type CreateClaimInput = z.infer<typeof createClaimSchema>;
+export type ListClaimsQuery = z.infer<typeof listClaimsQuerySchema>;

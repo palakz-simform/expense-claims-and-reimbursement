@@ -35,6 +35,7 @@ Each user has one role. Approvers also have an `approvalLevel` (1 or 2).
 - **Approved claims are locked** in the service layer and by PostgreSQL triggers on line items and receipts.
 - **Audit trail:** every state change writes a `ClaimHistory` row in the same transaction.
 - **Visibility is enforced in queries.** An approver requesting a claim outside their queue gets `404`.
+- **Lists are paginated, never loaded whole.** `GET /claims?page=1&pageSize=20` (`pageSize` at most 100) returns `{ data, pagination: { page, pageSize, totalItems, totalPages } }`, newest first; list items have the computed `total` and `lineItemCount` but no line items. Totals for a page come from one grouped query.
 
 ## Logging and request IDs
 

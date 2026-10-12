@@ -2,7 +2,7 @@ import { OpenApiGeneratorV31, OpenAPIRegistry } from "@asteasolutions/zod-to-ope
 import { z } from "zod";
 import { Role } from "../generated/prisma/enums";
 import { loginSchema } from "../modules/auth/auth.schemas";
-import { claimIdParamsSchema, createClaimSchema } from "../modules/claims/claims.schemas";
+import { claimIdParamsSchema, createClaimSchema, listClaimsQuerySchema } from "../modules/claims/claims.schemas";
 
 // Concept: single source of truth. Request bodies reuse the real Zod schemas the controllers
 // validate with, so the docs cannot drift from the code. Only responses are described here.
@@ -118,6 +118,39 @@ registry.registerPath({
   responses: {
     201: { description: "The new draft claim with its computed total", content: { "application/json": { schema: claimResponseSchema } } },
     400: errorResponse("VALIDATION_ERROR (including unknown fields such as `total`)"),
+    401: errorResponse("Missing, invalid or expired token"),
+    403: errorResponse("Not a CLAIMANT"),
+  },
+});
+
+// A claim in a list: no line items, just how many there are
+const claimSummarySchema = claimResponseSchema.omit({ lineItems: true }).extend({ lineItemCount: z.number().int() });
+
+registry.registerPath({
+  method: "get",
+  path: "/claims",
+  tags: ["Claims"],
+  summary: "List your own claims, newest first, one page at a time (CLAIMANT only)",
+  security: [{ [bearerAuth.name]: [] }],
+  request: { query: listClaimsQuerySchema },
+  responses: {
+    200: {
+      description: "One page of claims (without line items) and the pagination info",
+      content: {
+        "application/json": {
+          schema: z.object({
+            data: z.array(claimSummarySchema),
+            pagination: z.object({
+              page: z.number().int(),
+              pageSize: z.number().int(),
+              totalItems: z.number().int(),
+              totalPages: z.number().int(),
+            }),
+          }),
+        },
+      },
+    },
+    400: errorResponse("VALIDATION_ERROR (page below 1, pageSize above 100, unknown query field)"),
     401: errorResponse("Missing, invalid or expired token"),
     403: errorResponse("Not a CLAIMANT"),
   },
