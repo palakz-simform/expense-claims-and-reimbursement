@@ -1,0 +1,1188 @@
+{
+  "info": {
+    "name": "Expense Claims API",
+    "description": "Auth and claim endpoints. Import the matching environment, set its `password` (the seed password), run '1. Auth' first, then '2. Claims' in order. Every error has { error: { code, message, requestId, details? } }.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Today's date (UTC) for line item dates: they must not be in the future",
+          "pm.collectionVariables.set('today', new Date().toISOString().slice(0, 10));"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:4000"
+    },
+    {
+      "key": "claimantEmail",
+      "value": "asha.claimant@example.com"
+    },
+    {
+      "key": "claimant2Email",
+      "value": "bilal.claimant@example.com"
+    },
+    {
+      "key": "approverEmail",
+      "value": "ravi.l1@example.com"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "tokenOther",
+      "value": ""
+    },
+    {
+      "key": "tokenApprover",
+      "value": ""
+    },
+    {
+      "key": "claimId",
+      "value": ""
+    },
+    {
+      "key": "itemId",
+      "value": ""
+    },
+    {
+      "key": "today",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "0. System",
+      "item": [
+        {
+          "name": "Health check (GET /health, no token)",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Liveness check used by Docker and load balancers. Needs no token and is not logged."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Reports ok\", function () { pm.expect(pm.response.json().status).to.eql(\"ok\"); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "1. Auth",
+      "item": [
+        {
+          "name": "Login as claimant (Asha)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Saves the JWT in {{token}}. Run this first. Needs the `password` environment variable.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{claimantEmail}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set(\"token\", body.token);",
+                  "pm.test(\"Response has a token and the user\", function () { pm.expect(body.token).to.be.a(\"string\"); pm.expect(body.user.email).to.eql(pm.variables.get(\"claimantEmail\")); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login as second claimant (Bilal)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Saves a second claimant's token in {{tokenOther}}, used by the isolation checks.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{claimant2Email}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set(\"tokenOther\", body.token);",
+                  "pm.test(\"Response has a token and the user\", function () { pm.expect(body.token).to.be.a(\"string\"); pm.expect(body.user.email).to.eql(pm.variables.get(\"claimant2Email\")); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login as approver (Ravi)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Saves an approver's token in {{tokenApprover}}, used by the role checks.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{approverEmail}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set(\"tokenApprover\", body.token);",
+                  "pm.test(\"Response has a token and the user\", function () { pm.expect(body.token).to.be.a(\"string\"); pm.expect(body.user.email).to.eql(pm.variables.get(\"approverEmail\")); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Who am I (GET /auth/me)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Returns the logged-in user without a password hash\", function () { const u = pm.response.json().user; pm.expect(u.email).to.eql(pm.variables.get(\"claimantEmail\")); pm.expect(u).to.not.have.property(\"passwordHash\"); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Claims (run in order)",
+      "item": [
+        {
+          "name": "Create claim with 2 line items",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/claims",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims"
+              ]
+            },
+            "description": "Saves {{claimId}} and {{itemId}} (the first line item) for the next requests. The total is computed by the server; sending `total` is rejected.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Postman test claim\",\n  \"lineItems\": [\n    {\n      \"date\": \"{{today}}\",\n      \"category\": \"MEALS\",\n      \"amount\": 12.5,\n      \"description\": \"Lunch\"\n    },\n    {\n      \"date\": \"{{today}}\",\n      \"category\": \"TRANSPORT\",\n      \"amount\": \"18.00\",\n      \"description\": \"Taxi\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 201\", function () { pm.response.to.have.status(201); });",
+                  "const claim = pm.response.json();",
+                  "pm.collectionVariables.set(\"claimId\", claim.id);",
+                  "pm.collectionVariables.set(\"itemId\", claim.lineItems[0].id);",
+                  "pm.test(\"Draft with a computed total of 30.50\", function () { pm.expect(claim.status).to.eql(\"DRAFT\"); pm.expect(claim.total).to.eql(\"30.50\"); pm.expect(claim.lineItems.length).to.eql(2); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create claim with no items (empty draft)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/claims",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Postman empty draft\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 201\", function () { pm.response.to.have.status(201); });",
+                  "pm.test(\"Total is 0.00 with no items\", function () { const c = pm.response.json(); pm.expect(c.total).to.eql(\"0.00\"); pm.expect(c.lineItems.length).to.eql(0); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List my claims (page 1, size 5)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims?page=1&pageSize=5",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims?page=1&pageSize=5"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Has data and pagination, no line items in the list\", function () { const b = pm.response.json(); pm.expect(b.data).to.be.an(\"array\"); pm.expect(b.pagination).to.have.all.keys(\"page\",\"pageSize\",\"totalItems\",\"totalPages\"); if (b.data.length) { pm.expect(b.data[0]).to.have.property(\"lineItemCount\"); pm.expect(b.data[0]).to.not.have.property(\"lineItems\"); } });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get one claim",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{claimId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{claimId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Same claim with its items\", function () { const c = pm.response.json(); pm.expect(c.id).to.eql(pm.collectionVariables.get(\"claimId\")); pm.expect(c.total).to.eql(\"30.50\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Add a line item",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{claimId}}/line-items",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{claimId}}",
+                "line-items"
+              ]
+            },
+            "description": "The body is ONE line item. The date uses {{today}}, which a collection pre-request script sets.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"{{today}}\",\n  \"category\": \"OFFICE_SUPPLIES\",\n  \"amount\": \"7.25\",\n  \"description\": \"Notebook\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 201\", function () { pm.response.to.have.status(201); });",
+                  "pm.test(\"Total went up by 7.25 (30.50 -> 37.75), 3 items\", function () { const c = pm.response.json(); pm.expect(c.total).to.eql(\"37.75\"); pm.expect(c.lineItems.length).to.eql(3); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update a line item: only the amount (PATCH)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{claimId}}/line-items/{{itemId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{claimId}}",
+                "line-items",
+                "{{itemId}}"
+              ]
+            },
+            "description": "PATCH changes only the fields you send (at least one of date, category, amount, description). This example sends just the amount; the next request changes several fields.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"20.00\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Total is now 45.25 (the 12.50 item became 20.00)\", function () { pm.expect(pm.response.json().total).to.eql(\"45.25\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update a line item: several fields at once (PATCH)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{claimId}}/line-items/{{itemId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{claimId}}",
+                "line-items",
+                "{{itemId}}"
+              ]
+            },
+            "description": "Any combination of date, category, amount and description. Fields you leave out stay as they are.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Team lunch\",\n  \"category\": \"TRAVEL\",\n  \"date\": \"{{today}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Total unchanged (45.25): the amount was not touched\", function () { pm.expect(pm.response.json().total).to.eql(\"45.25\"); });",
+                  "pm.test(\"Description, category and date changed together\", function () { const item = pm.response.json().lineItems.find(i => i.id === pm.collectionVariables.get(\"itemId\")); pm.expect(item.description).to.eql(\"Team lunch\"); pm.expect(item.category).to.eql(\"TRAVEL\"); pm.expect(item.date).to.eql(pm.collectionVariables.get(\"today\")); pm.expect(item.amount).to.eql(\"20.00\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete a line item",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{claimId}}/line-items/{{itemId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{claimId}}",
+                "line-items",
+                "{{itemId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Item is gone and total recomputed (45.25 - 20.00 = 25.25)\", function () { const c = pm.response.json(); pm.expect(c.total).to.eql(\"25.25\"); pm.expect(c.lineItems.length).to.eql(2); pm.expect(c.lineItems.map(i => i.id)).to.not.include(pm.collectionVariables.get(\"itemId\")); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Should fail (negative checks)",
+      "item": [
+        {
+          "name": "Create with a client-supplied total -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/claims",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"x\",\n  \"total\": 100\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"Error code is VALIDATION_ERROR\", function () { pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"); });",
+                  "pm.test(\"Names the unknown field\", function () { pm.expect(JSON.stringify(pm.response.json().error.details)).to.include(\"total\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create with invalid items -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/claims",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"x\",\n  \"lineItems\": [\n    {\n      \"date\": \"2999-01-01\",\n      \"category\": \"CRYPTO\",\n      \"amount\": 0,\n      \"description\": \"\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"Error code is VALIDATION_ERROR\", function () { pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"); });",
+                  "pm.test(\"Reports each bad field with its path\", function () { const paths = pm.response.json().error.details.map(d => d.path); [\"lineItems.0.date\",\"lineItems.0.category\",\"lineItems.0.amount\",\"lineItems.0.description\"].forEach(p => pm.expect(paths).to.include(p)); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Malformed JSON -> 400 INVALID_JSON",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/claims",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims"
+              ]
+            },
+            "description": "A trailing comma is not valid JSON.",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"title\": \"x\", }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"Error code is INVALID_JSON\", function () { pm.expect(pm.response.json().error.code).to.eql(\"INVALID_JSON\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Add item with amount 0 -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{claimId}}/line-items",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{claimId}}",
+                "line-items"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"{{today}}\",\n  \"category\": \"OFFICE_SUPPLIES\",\n  \"amount\": 0,\n  \"description\": \"Notebook\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"Error code is VALIDATION_ERROR\", function () { pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update with an empty body -> 400",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{claimId}}/line-items/{{itemId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{claimId}}",
+                "line-items",
+                "{{itemId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"Error code is VALIDATION_ERROR\", function () { pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update a field that cannot be edited (claimId) -> 400",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{claimId}}/line-items/{{itemId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{claimId}}",
+                "line-items",
+                "{{itemId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"claimId\": \"{{claimId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"Error code is VALIDATION_ERROR\", function () { pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List with pageSize 101 -> 400",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims?pageSize=101",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims?pageSize=101"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"Error code is VALIDATION_ERROR\", function () { pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Claim id that is not a UUID -> 400",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims/not-a-uuid",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "not-a-uuid"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"Error code is VALIDATION_ERROR\", function () { pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unknown claim id -> 404",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims/0198f7a2-7c5d-7a3e-9b1a-3f2c1d0e4a5b",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "0198f7a2-7c5d-7a3e-9b1a-3f2c1d0e4a5b"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 404\", function () { pm.response.to.have.status(404); });",
+                  "pm.test(\"Error code is NOT_FOUND\", function () { pm.expect(pm.response.json().error.code).to.eql(\"NOT_FOUND\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Another claimant reads my claim -> 404",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{claimId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{claimId}}"
+              ]
+            },
+            "description": "Needs 'Login as second claimant'. Refused in the query itself: 404, not 403.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenOther}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 404\", function () { pm.response.to.have.status(404); });",
+                  "pm.test(\"Error code is NOT_FOUND\", function () { pm.expect(pm.response.json().error.code).to.eql(\"NOT_FOUND\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Another claimant edits my claim -> 404",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{claimId}}/line-items",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{claimId}}",
+                "line-items"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"{{today}}\",\n  \"category\": \"OFFICE_SUPPLIES\",\n  \"amount\": \"7.25\",\n  \"description\": \"Notebook\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenOther}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 404\", function () { pm.response.to.have.status(404); });",
+                  "pm.test(\"Error code is NOT_FOUND\", function () { pm.expect(pm.response.json().error.code).to.eql(\"NOT_FOUND\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Approver creates a claim -> 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/claims",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims"
+              ]
+            },
+            "description": "Needs 'Login as approver'.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"x\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenApprover}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 403\", function () { pm.response.to.have.status(403); });",
+                  "pm.test(\"Error code is FORBIDDEN\", function () { pm.expect(pm.response.json().error.code).to.eql(\"FORBIDDEN\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "No token -> 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 401\", function () { pm.response.to.have.status(401); });",
+                  "pm.test(\"Error code is UNAUTHENTICATED\", function () { pm.expect(pm.response.json().error.code).to.eql(\"UNAUTHENTICATED\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Wrong password -> 401",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{claimantEmail}}\",\n  \"password\": \"definitely-wrong\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 401\", function () { pm.response.to.have.status(401); });",
+                  "pm.test(\"Error code is INVALID_CREDENTIALS\", function () { pm.expect(pm.response.json().error.code).to.eql(\"INVALID_CREDENTIALS\"); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
