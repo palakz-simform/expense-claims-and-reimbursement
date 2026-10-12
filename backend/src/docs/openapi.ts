@@ -2,6 +2,7 @@ import { OpenApiGeneratorV31, OpenAPIRegistry } from "@asteasolutions/zod-to-ope
 import { z } from "zod";
 import { Role } from "../generated/prisma/enums";
 import { loginSchema } from "../modules/auth/auth.schemas";
+import { claimIdParamsSchema, createClaimSchema } from "../modules/claims/claims.schemas";
 
 // Concept: single source of truth. Request bodies reuse the real Zod schemas the controllers
 // validate with, so the docs cannot drift from the code. Only responses are described here.
@@ -81,6 +82,60 @@ registry.registerPath({
   responses: {
     200: { description: "The authenticated user", content: { "application/json": { schema: z.object({ user: userSchema }) } } },
     401: errorResponse("Missing, invalid or expired token"),
+  },
+});
+
+// --- Claims ---
+// Money is a string with 2 decimals (never a JSON number); the total is computed by the database, never accepted as input.
+const claimResponseSchema = z.object({
+  id: z.string(),
+  claimNumber: z.number().int(),
+  title: z.string(),
+  status: z.enum(["DRAFT", "PENDING_APPROVAL", "REJECTED", "APPROVED"]),
+  total: z.string(),
+  submittedAt: z.string().nullable(),
+  approvedAt: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  lineItems: z.array(
+    z.object({
+      id: z.string(),
+      date: z.string(),
+      category: z.string(),
+      amount: z.string(),
+      description: z.string(),
+    }),
+  ),
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/claims",
+  tags: ["Claims"],
+  summary: "Create a draft claim with 0 to 100 line items (CLAIMANT only)",
+  security: [{ [bearerAuth.name]: [] }],
+  request: { body: { content: { "application/json": { schema: createClaimSchema } } } },
+  responses: {
+    201: { description: "The new draft claim with its computed total", content: { "application/json": { schema: claimResponseSchema } } },
+    400: errorResponse("VALIDATION_ERROR (including unknown fields such as `total`)"),
+    401: errorResponse("Missing, invalid or expired token"),
+    403: errorResponse("Not a CLAIMANT"),
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/claims/{id}",
+  tags: ["Claims"],
+  summary: "Get one of your own claims (CLAIMANT only)",
+  security: [{ [bearerAuth.name]: [] }],
+  request: { params: claimIdParamsSchema },
+  responses: {
+    200: { description: "The claim with its line items and computed total", content: { "application/json": { schema: claimResponseSchema } } },
+    400: errorResponse("VALIDATION_ERROR (id is not a UUID)"),
+    401: errorResponse("Missing, invalid or expired token"),
+    403: errorResponse("Not a CLAIMANT"),
+    404: errorResponse("No such claim, or it belongs to someone else"),
   },
 });
 
