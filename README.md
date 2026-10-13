@@ -37,6 +37,7 @@ Each user has one role. Approvers also have an `approvalLevel` (1 or 2).
 - **Visibility is enforced in queries.** An approver requesting a claim outside their queue gets `404`.
 - **Only drafts can be deleted.** A draft was never submitted, so `DELETE /claims/:id` removes it together with its line items and its own history. A submitted claim (pending, rejected or approved) is never deleted: its history and approvals are the audit trail finance may need in a dispute. Only the `title` of a claim can be edited (`PATCH /claims/:id`); the total is derived and the status follows the workflow.
 - **Lists are paginated, never loaded whole.** `GET /claims?page=1&pageSize=20` (`pageSize` at most 100) returns `{ data, pagination: { page, pageSize, totalItems, totalPages } }`, newest first; list items have the computed `total` and `lineItemCount` but no line items. Totals for a page come from one grouped query.
+- **Dates are calendar dates compared in UTC.** A line item's `date` (`YYYY-MM-DD`) must be a real date and cannot be later than today's date in UTC (server time). A user far west of UTC may therefore be able to enter a date that is still "tomorrow" on their own clock; the rule never rejects a valid past expense.
 
 ## Logging and request IDs
 
