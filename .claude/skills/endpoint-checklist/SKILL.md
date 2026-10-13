@@ -29,6 +29,7 @@ Review `$ARGUMENTS` (or the endpoints changed in the current diff) against this 
 
 **API docs**
 - Path, request body (reuse the Zod schema) and every response code registered in `backend/src/docs/openapi.ts` (`registry.registerPath`). Docs are hand-written and do not update themselves.
+- The request (and its negative cases) added to the Postman collection in `backend/postman/` with `pm.test` checks.
 
 **Tests**
 - Note which test covers it; the two mandatory ones are approver-by-ID isolation and total-cannot-desync.

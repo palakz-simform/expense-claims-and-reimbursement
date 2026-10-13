@@ -43,6 +43,7 @@ Run commands from `backend/`.
 ## API docs (Swagger)
 - Swagger UI at `/docs`, spec at `/openapi.json`, built in `src/docs/openapi.ts`; disabled in production.
 - **Every new or changed endpoint must also be registered/updated in `src/docs/openapi.ts`** (`registry.registerPath`): reuse the Zod schema for the request, list each response code. Response docs are hand-written and do not update themselves.
+- **The Postman collection must also be updated** (`backend/postman/expense-claims.postman_collection.json`): add or edit the request and its `pm.test` checks (include negative cases for new rules). It is hand-maintained, so it goes stale otherwise. Never put a real password in the collection or environment file.
 
 ## Data integrity
 - **Money:** `Decimal(12,2)` in the DB, Prisma `Decimal` in code; never JS `number` for amounts. Concept: *floating-point error*.

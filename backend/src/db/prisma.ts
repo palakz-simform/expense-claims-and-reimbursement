@@ -7,4 +7,5 @@ import { env } from "../config/env";
 // Prisma CLI (migrations) uses the direct URL from prisma.config.ts.
 export const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: env.DATABASE_URL_POOLED }),
+  transactionOptions: { maxWait: 5000, timeout: 15000 },
 });
