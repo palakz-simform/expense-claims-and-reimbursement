@@ -42,7 +42,7 @@ app.use(authenticate);
 
 // Protected routes
 app.use("/auth", authProtectedRouter); // GET /auth/me
-app.use("/claims", claimsRouter); // POST /claims, GET /claims/:id
+app.use("/claims", claimsRouter); // claims CRUD and line item edits (/claims, /claims/:id, /claims/:id/line-items/...)
 
 // 404 for unknown routes, then the central error handler (must be last)
 app.use(notFoundHandler);
