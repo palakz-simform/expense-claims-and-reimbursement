@@ -91,17 +91,22 @@ export async function createClaim(user: AuthUser, input: CreateClaimInput) {
 // Read one of the caller's own claims. The ownership filter is IN the query, so someone else's
 // claim is simply "not found" (404, not 403: we do not reveal that it exists).
 export async function getClaim(user: AuthUser, id: string) {
-  const claim = await prisma.claim.findFirst({
-    where: { id, claimantId: user.id },
-    include: withLineItems,
-  });
-  if (!claim) {
-    throw new AppError(404, "NOT_FOUND", "Claim not found");
-  }
+  return prisma.$transaction(
+    async (tx) => {
+      const claim = await tx.claim.findFirst({
+        where: { id, claimantId: user.id },
+        include: withLineItems,
+      });
+      if (!claim) {
+        throw new AppError(404, "NOT_FOUND", "Claim not found");
+      }
 
-  const total = await getClaimTotal(claim.id, prisma);
+      const total = await getClaimTotal(claim.id, tx);
 
-  return toClaimResponse(claim, total);
+      return toClaimResponse(claim, total);
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }, // RepeatableRead ensures all queries in the transaction see the same consistent snapshot, even if other transactions modify the data.
+  );
 }
 
 // List the caller's own claims, newest first, one page at a time (never loads them all).
