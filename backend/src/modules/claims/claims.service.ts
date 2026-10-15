@@ -6,7 +6,7 @@ import { getClaimTotal, getClaimTotals } from "../../lib/claimTotal";
 import { Prisma } from "../../generated/prisma/client";
 import { ClaimStatus } from "../../generated/prisma/enums";
 import type { AuthUser } from "../../types/express";
-import { buildChain } from "../approvals/approvals.service";
+import { buildChain, resetChain } from "../approvals/approvals.service";
 import { MAX_LINE_ITEMS } from "./claims.schemas";
 import type {
   CreateClaimInput,
@@ -277,6 +277,14 @@ async function runClaimEdit(
         },
       },
     });
+
+    // A new total voids every decision made so far, so the chain starts again from level 1.
+    // A rejected claim has no live chain (resubmit builds one), and an unchanged total (a title or
+    // description edit) changes nothing the approvers decided on, so neither of those resets.
+    const isPending = locked.status === ClaimStatus.PENDING_APPROVAL;
+    if (isPending && !oldTotal.equals(newTotal)) {
+      await resetChain(tx, user, claimId, locked.currentApprovalVersion, oldTotal, newTotal);
+    }
 
     return loadClaimResponse(tx, claimId);
   });
