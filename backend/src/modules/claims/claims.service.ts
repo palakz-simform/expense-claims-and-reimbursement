@@ -147,6 +147,8 @@ export async function listClaims(user: AuthUser, query: ListClaimsQuery) {
 export async function updateClaim(user: AuthUser, claimId: string, changes: UpdateClaimInput) {
   return runClaimEdit(user, claimId, async (tx) => {
     await tx.claim.update({ where: { id: claimId }, data: { title: changes.title } });
+
+    return { change: "title changed" };
   });
 }
 
@@ -223,33 +225,58 @@ export async function submitClaim(user: AuthUser, claimId: string) {
 // Editing line items
 // ---------------------------------------------------------------------------
 
-// Locks the claim and checks its content can be edited (line items, title)
+// Locks the claim and checks its content can be edited (line items, title).
+// Only an APPROVED claim is closed for good. A DRAFT, a REJECTED claim and a claim awaiting approval can all be edited.
 async function lockEditableClaim(tx: Prisma.TransactionClient, user: AuthUser, claimId: string) {
-  const { status } = await lockClaim(tx, user, claimId);
+  const locked = await lockClaim(tx, user, claimId);
 
-  if (status === ClaimStatus.APPROVED) {
+  if (locked.status === ClaimStatus.APPROVED) {
     throw new AppError(409, "CLAIM_LOCKED", "This claim is approved and can no longer be changed");
   }
 
-  // Editing a claim that is mid-approval must rebuild its approval chain, which comes in Phase 10
-  if (status === ClaimStatus.PENDING_APPROVAL) {
-    throw new AppError(409, "CLAIM_NOT_EDITABLE", "This claim is awaiting approval and cannot be edited yet");
-  }
+  return locked;
 }
 
+// What an edit reports back, so the history row can say what changed
+type ClaimEditResult = { change: string; itemId?: string };
+
 // The ONE flow every edit of a claim goes through (title, add / change / remove a line item), in a
-// single transaction: lock and check the claim, apply the edit, return the claim as the API shows it.
+// single transaction: lock and check the claim, apply the edit, record it, return the claim as the API shows it.
 // The edit itself is passed in, so rules that apply to every edit live here once, not in four places.
 // Concept: higher-order function (a shared flow with the varying step handed in).
 async function runClaimEdit(
   user: AuthUser,
   claimId: string,
-  edit: (tx: Prisma.TransactionClient) => Promise<void>,
+  edit: (tx: Prisma.TransactionClient) => Promise<ClaimEditResult>,
 ) {
   return prisma.$transaction(async (tx) => {
-    await lockEditableClaim(tx, user, claimId);
+    const locked = await lockEditableClaim(tx, user, claimId);
 
-    await edit(tx);
+    // A draft has no history yet, so it skips the extra queries below
+    if (locked.status === ClaimStatus.DRAFT) {
+      await edit(tx);
+      return loadClaimResponse(tx, claimId);
+    }
+
+    // Totals before and after the edit (the history row shows how the amount moved)
+    const oldTotal = await getClaimTotal(claimId, tx);
+    const result = await edit(tx);
+    const newTotal = await getClaimTotal(claimId, tx);
+
+    // Audit trail: edits to a claim that was already submitted are recorded, in the same transaction
+    await tx.claimHistory.create({
+      data: {
+        claimId,
+        action: "CLAIM_UPDATED",
+        performedById: user.id,
+        metadata: {
+          change: result.change,
+          itemId: result.itemId ?? null,
+          oldTotal: oldTotal.toFixed(2),
+          newTotal: newTotal.toFixed(2),
+        },
+      },
+    });
 
     return loadClaimResponse(tx, claimId);
   });
@@ -296,8 +323,10 @@ export async function addLineItem(user: AuthUser, claimId: string, item: LineIte
       throw new AppError(422, "LINE_ITEM_LIMIT_REACHED", `A claim can have at most ${MAX_LINE_ITEMS} line items`);
     }
 
-    await tx.lineItem.create({ data: toLineItemData(claimId, item) });
+    const created = await tx.lineItem.create({ data: toLineItemData(claimId, item) });
     await touchClaim(tx, claimId);
+
+    return { change: "line item added", itemId: created.id };
   });
 }
 
@@ -317,6 +346,8 @@ export async function updateLineItem(user: AuthUser, claimId: string, itemId: st
       },
     });
     await touchClaim(tx, claimId);
+
+    return { change: "line item changed", itemId };
   });
 }
 
@@ -327,5 +358,7 @@ export async function deleteLineItem(user: AuthUser, claimId: string, itemId: st
 
     await tx.lineItem.delete({ where: { id: itemId } });
     await touchClaim(tx, claimId);
+
+    return { change: "line item removed", itemId };
   });
 }
