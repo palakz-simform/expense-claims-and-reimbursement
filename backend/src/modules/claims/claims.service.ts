@@ -145,12 +145,8 @@ export async function listClaims(user: AuthUser, query: ListClaimsQuery) {
 
 // Change the claim itself. Only the title is editable: the total is derived and the status follows the workflow.
 export async function updateClaim(user: AuthUser, claimId: string, changes: UpdateClaimInput) {
-  return prisma.$transaction(async (tx) => {
-    await lockEditableClaim(tx, user, claimId);
-
+  return runClaimEdit(user, claimId, async (tx) => {
     await tx.claim.update({ where: { id: claimId }, data: { title: changes.title } });
-
-    return loadClaimResponse(tx, claimId);
   });
 }
 
@@ -241,6 +237,24 @@ async function lockEditableClaim(tx: Prisma.TransactionClient, user: AuthUser, c
   }
 }
 
+// The ONE flow every edit of a claim goes through (title, add / change / remove a line item), in a
+// single transaction: lock and check the claim, apply the edit, return the claim as the API shows it.
+// The edit itself is passed in, so rules that apply to every edit live here once, not in four places.
+// Concept: higher-order function (a shared flow with the varying step handed in).
+async function runClaimEdit(
+  user: AuthUser,
+  claimId: string,
+  edit: (tx: Prisma.TransactionClient) => Promise<void>,
+) {
+  return prisma.$transaction(async (tx) => {
+    await lockEditableClaim(tx, user, claimId);
+
+    await edit(tx);
+
+    return loadClaimResponse(tx, claimId);
+  });
+}
+
 // Explicit field mapping (never spread a request body into a Prisma call)
 function toLineItemData(claimId: string, item: LineItemInput) {
   return {
@@ -276,9 +290,7 @@ async function loadClaimResponse(tx: Prisma.TransactionClient, claimId: string) 
 
 // Add ONE line item to a claim
 export async function addLineItem(user: AuthUser, claimId: string, item: LineItemInput) {
-  return prisma.$transaction(async (tx) => {
-    await lockEditableClaim(tx, user, claimId);
-
+  return runClaimEdit(user, claimId, async (tx) => {
     const existingCount = await tx.lineItem.count({ where: { claimId } });
     if (existingCount >= MAX_LINE_ITEMS) {
       throw new AppError(422, "LINE_ITEM_LIMIT_REACHED", `A claim can have at most ${MAX_LINE_ITEMS} line items`);
@@ -286,15 +298,12 @@ export async function addLineItem(user: AuthUser, claimId: string, item: LineIte
 
     await tx.lineItem.create({ data: toLineItemData(claimId, item) });
     await touchClaim(tx, claimId);
-
-    return loadClaimResponse(tx, claimId);
   });
 }
 
 // Change some fields of ONE line item (only the fields that are sent)
 export async function updateLineItem(user: AuthUser, claimId: string, itemId: string, changes: UpdateLineItemInput) {
-  return prisma.$transaction(async (tx) => {
-    await lockEditableClaim(tx, user, claimId);
+  return runClaimEdit(user, claimId, async (tx) => {
     await findLineItem(tx, claimId, itemId);
 
     // Prisma leaves out fields that are undefined, so only the fields that were sent are updated
@@ -308,20 +317,15 @@ export async function updateLineItem(user: AuthUser, claimId: string, itemId: st
       },
     });
     await touchClaim(tx, claimId);
-
-    return loadClaimResponse(tx, claimId);
   });
 }
 
 // Remove ONE line item from a claim
 export async function deleteLineItem(user: AuthUser, claimId: string, itemId: string) {
-  return prisma.$transaction(async (tx) => {
-    await lockEditableClaim(tx, user, claimId);
+  return runClaimEdit(user, claimId, async (tx) => {
     await findLineItem(tx, claimId, itemId);
 
     await tx.lineItem.delete({ where: { id: itemId } });
     await touchClaim(tx, claimId);
-
-    return loadClaimResponse(tx, claimId);
   });
 }
