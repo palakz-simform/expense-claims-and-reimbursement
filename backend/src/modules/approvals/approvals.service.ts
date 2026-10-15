@@ -17,10 +17,17 @@ export async function buildChain(
   // How many levels this total needs (from the policy table, never hardcoded here)
   const levels = requiredLevels(total);
 
-  // The claimant's fixed approver for every needed level, in ONE query (not one per level)
+  // A claim with no approval levels would be submitted with nobody able to approve it. That means the
+  // policy table is misconfigured (a server bug, not a client mistake), so fail loudly and roll back.
+  if (levels < 1) {
+    throw new Error(`Approval policy returned ${levels} levels for a total of ${total.toFixed(2)}`);
+  }
+
+  // The claimant's fixed approver for every needed level, in ONE query (not one per level).
+  // Only the two approver columns that are checked below are loaded (never the password hash).
   const assignments = await tx.approverAssignment.findMany({
     where: { claimantId, level: { lte: levels } },
-    include: { approver: true },
+    include: { approver: { select: { role: true, approvalLevel: true } } },
   });
   const assignmentByLevel = new Map<number, (typeof assignments)[number]>();
   for (const assignment of assignments) {
