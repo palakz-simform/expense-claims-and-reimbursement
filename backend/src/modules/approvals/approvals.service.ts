@@ -2,6 +2,7 @@ import { AppError } from "../../lib/AppError";
 import { requiredLevels } from "../../lib/approvalPolicy";
 import type { Prisma } from "../../generated/prisma/client";
 import { ApprovalStatus, Role } from "../../generated/prisma/enums";
+import type { AuthUser } from "../../types/express";
 
 // Builds the approval chain for a claim: one Approval row per required level.
 // ONE function for submit, resubmit and chain reset, so the routing rule exists in a single place.
@@ -56,4 +57,48 @@ export async function buildChain(
   await tx.approval.createMany({ data: approvals });
 
   return approvals;
+}
+
+// Throws away the live approval chain and starts a new one from level 1. Used when an edit changes
+// the total of a claim that is awaiting approval: approvers decided on a different amount, so every
+// decision (even an already granted one) is void. The same approvers come back, because buildChain
+// reads the claimant's fixed assignments (Alice approved, Bob pending: both reset, Alice is asked again).
+// Must run inside the caller's transaction, with the claim row locked.
+export async function resetChain(
+  tx: Prisma.TransactionClient,
+  user: AuthUser,
+  claimId: string,
+  previousVersion: number,
+  oldTotal: Prisma.Decimal,
+  newTotal: Prisma.Decimal,
+) {
+  // Void the live chain. The rows stay for the audit trail; they are just no longer decisions that count.
+  await tx.approval.updateMany({
+    where: {
+      claimId,
+      chainVersion: previousVersion,
+      status: { in: [ApprovalStatus.WAITING, ApprovalStatus.PENDING, ApprovalStatus.APPROVED] },
+    },
+    data: { status: ApprovalStatus.INVALIDATED },
+  });
+
+  // A new chain for the new total (it may have more or fewer levels), then point the claim at it
+  const newVersion = previousVersion + 1;
+  await buildChain(tx, claimId, user.id, newTotal, newVersion);
+  await tx.claim.update({ where: { id: claimId }, data: { currentApprovalVersion: newVersion } });
+
+  // Audit trail: written in the same transaction as the change
+  await tx.claimHistory.create({
+    data: {
+      claimId,
+      action: "APPROVAL_CHAIN_RESET",
+      performedById: user.id,
+      metadata: {
+        oldTotal: oldTotal.toFixed(2),
+        newTotal: newTotal.toFixed(2),
+        previousApprovalVersion: previousVersion,
+        newApprovalVersion: newVersion,
+      },
+    },
+  });
 }
