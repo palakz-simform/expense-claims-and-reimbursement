@@ -70,6 +70,10 @@
     {
       "key": "emptyClaimId",
       "value": ""
+    },
+    {
+      "key": "emptyDraftId",
+      "value": ""
     }
   ],
   "item": [
@@ -721,7 +725,221 @@
       ]
     },
     {
-      "name": "4. Should fail (negative checks)",
+      "name": "4. Submit for approval (run in order)",
+      "item": [
+        {
+          "name": "Submit the claim",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{claimId}}/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{claimId}}",
+                "submit"
+              ]
+            },
+            "description": "Uses {{claimId}} from the claims folders (it still has line items). The server builds the approval chain from the total: level 1 approver PENDING, higher levels WAITING."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Now pending approval, submittedAt set, total unchanged\", function () { const c = pm.response.json(); pm.expect(c.status).to.eql(\"PENDING_APPROVAL\"); pm.expect(c.submittedAt).to.not.eql(null); pm.expect(c.total).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Submit again -> 409 CLAIM_NOT_SUBMITTABLE",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{claimId}}/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{claimId}}",
+                "submit"
+              ]
+            },
+            "description": "Only a DRAFT can be submitted; a double click or retry is refused."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 409\", function () { pm.response.to.have.status(409); });",
+                  "pm.test(\"Error code is CLAIM_NOT_SUBMITTABLE\", function () { pm.expect(pm.response.json().error.code).to.eql(\"CLAIM_NOT_SUBMITTABLE\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Edit the submitted claim -> 409 CLAIM_NOT_EDITABLE",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{claimId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{claimId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Should not change\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "A claim awaiting approval is read-only until the chain-reset phase."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 409\", function () { pm.response.to.have.status(409); });",
+                  "pm.test(\"Error code is CLAIM_NOT_EDITABLE\", function () { pm.expect(pm.response.json().error.code).to.eql(\"CLAIM_NOT_EDITABLE\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete the submitted claim -> 409 CLAIM_NOT_DELETABLE",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{claimId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{claimId}}"
+              ]
+            },
+            "description": "A submitted claim is part of the audit trail and is never deleted."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 409\", function () { pm.response.to.have.status(409); });",
+                  "pm.test(\"Error code is CLAIM_NOT_DELETABLE\", function () { pm.expect(pm.response.json().error.code).to.eql(\"CLAIM_NOT_DELETABLE\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create an empty draft for the submit check",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/claims",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Postman empty draft to submit\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Saves {{emptyDraftId}}: a draft with no line items."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 201\", function () { pm.response.to.have.status(201); });",
+                  "pm.collectionVariables.set(\"emptyDraftId\", pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Submit a claim with no line items -> 422 NO_LINE_ITEMS",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{emptyDraftId}}/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{emptyDraftId}}",
+                "submit"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 422\", function () { pm.response.to.have.status(422); });",
+                  "pm.test(\"Error code is NO_LINE_ITEMS\", function () { pm.expect(pm.response.json().error.code).to.eql(\"NO_LINE_ITEMS\"); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5. Should fail (negative checks)",
       "item": [
         {
           "name": "Auth and access",
@@ -1329,6 +1547,117 @@
                     "exec": [
                       "pm.test(\"Status is 403\", function () { pm.response.to.have.status(403); });",
                       "pm.test(\"Error code is FORBIDDEN\", function () { pm.expect(pm.response.json().error.code).to.eql(\"FORBIDDEN\"); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Another claimant submits my claim -> 404",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/claims/{{claimId}}/submit",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "claims",
+                    "{{claimId}}",
+                    "submit"
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tokenOther}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "description": "Out-of-scope claims look like they do not exist (404, not 403)."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Status is 404\", function () { pm.response.to.have.status(404); });",
+                      "pm.test(\"Error code is NOT_FOUND\", function () { pm.expect(pm.response.json().error.code).to.eql(\"NOT_FOUND\"); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Approver submits a claim -> 403",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/claims/{{claimId}}/submit",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "claims",
+                    "{{claimId}}",
+                    "submit"
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tokenApprover}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Status is 403\", function () { pm.response.to.have.status(403); });",
+                      "pm.test(\"Error code is FORBIDDEN\", function () { pm.expect(pm.response.json().error.code).to.eql(\"FORBIDDEN\"); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Submit with an id that is not a UUID -> 400",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/claims/not-a-uuid/submit",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "claims",
+                    "not-a-uuid",
+                    "submit"
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Status is 400\", function () { pm.response.to.have.status(400); });",
+                      "pm.test(\"Error code is VALIDATION_ERROR\", function () { pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"); });"
                     ]
                   }
                 }

@@ -49,6 +49,14 @@ export async function deleteClaim(req: Request, res: Response) {
   res.status(204).send();
 }
 
+// POST /claims/:id/submit: send a draft for approval (no body: the server decides everything)
+export async function submit(req: Request, res: Response) {
+  const user = req.user!;
+  const claimId = req.params.id as string;
+  const claim = await claimsService.submitClaim(user, claimId);
+  res.json(claim);
+}
+
 // POST /claims/:id/line-items: add one line item
 export async function addLineItem(req: Request, res: Response) {
   const user = req.user!;

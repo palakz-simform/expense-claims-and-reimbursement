@@ -219,6 +219,24 @@ registry.registerPath({
 
 registry.registerPath({
   method: "post",
+  path: "/claims/{id}/submit",
+  tags: ["Claims"],
+  summary: "Submit your DRAFT claim for approval (builds the approval chain from its total)",
+  security: [{ [bearerAuth.name]: [] }],
+  request: { params: claimIdParamsSchema },
+  responses: {
+    200: { description: "The claim, now PENDING_APPROVAL with submittedAt set", content: { "application/json": { schema: claimResponseSchema } } },
+    400: errorResponse("VALIDATION_ERROR (id is not a UUID)"),
+    401: errorResponse("Missing, invalid or expired token"),
+    403: errorResponse("Not a CLAIMANT"),
+    404: errorResponse("No such claim, or it belongs to someone else"),
+    409: errorResponse("CLAIM_NOT_SUBMITTABLE (not a draft) or CLAIM_LOCKED (approved)"),
+    422: errorResponse("NO_LINE_ITEMS (nothing to approve) or NO_APPROVER_AVAILABLE (no valid approver at a required level)"),
+  },
+});
+
+registry.registerPath({
+  method: "post",
   path: "/claims/{id}/line-items",
   tags: ["Claims"],
   summary: "Add ONE line item to your claim (DRAFT or REJECTED only)",
