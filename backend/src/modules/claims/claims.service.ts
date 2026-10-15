@@ -1,10 +1,12 @@
 import { prisma } from "../../db/prisma";
 import { AppError } from "../../lib/AppError";
 import { logger } from "../../lib/logger";
+import { lockClaim } from "../../lib/claimLock";
 import { getClaimTotal, getClaimTotals } from "../../lib/claimTotal";
 import { Prisma } from "../../generated/prisma/client";
 import { ClaimStatus } from "../../generated/prisma/enums";
 import type { AuthUser } from "../../types/express";
+import { buildChain } from "../approvals/approvals.service";
 import { MAX_LINE_ITEMS } from "./claims.schemas";
 import type {
   CreateClaimInput,
@@ -157,7 +159,7 @@ export async function updateClaim(user: AuthUser, claimId: string, changes: Upda
 // audit trail finance may need, so it is never deleted.
 export async function deleteClaim(user: AuthUser, claimId: string) {
   await prisma.$transaction(async (tx) => {
-    const status = await lockClaim(tx, user, claimId);
+    const { status } = await lockClaim(tx, user, claimId);
 
     if (status === ClaimStatus.APPROVED) {
       throw new AppError(409, "CLAIM_LOCKED", "This claim is approved and can no longer be changed");
@@ -175,31 +177,59 @@ export async function deleteClaim(user: AuthUser, claimId: string) {
   logger.info({ claimId, userId: user.id }, "Draft claim deleted");
 }
 
+// Submit a DRAFT claim for approval. Everything below is ONE transaction: the status change, the
+// approval chain and the history row are saved together or not at all.
+export async function submitClaim(user: AuthUser, claimId: string) {
+  return prisma.$transaction(async (tx) => {
+    // Lock first, so a double click or a concurrent edit waits and then sees the new status
+    const { status, currentApprovalVersion } = await lockClaim(tx, user, claimId);
+
+    // Only a draft can be submitted (a rejected claim goes through resubmit, which comes in Phase 12)
+    if (status === ClaimStatus.APPROVED) {
+      throw new AppError(409, "CLAIM_LOCKED", "This claim is approved and can no longer be changed");
+    }
+    if (status !== ClaimStatus.DRAFT) {
+      throw new AppError(409, "CLAIM_NOT_SUBMITTABLE", "Only a draft claim can be submitted");
+    }
+
+    // A claim with nothing to approve cannot be submitted (a total of 0 is not the same as no items)
+    const itemCount = await tx.lineItem.count({ where: { claimId } });
+    if (itemCount === 0) {
+      throw new AppError(422, "NO_LINE_ITEMS", "A claim needs at least one line item before it can be submitted");
+    }
+
+    // The chain is built for the new version; the total comes from the database, never from the client
+    const total = await getClaimTotal(claimId, tx);
+    const chainVersion = currentApprovalVersion + 1;
+    const approvals = await buildChain(tx, claimId, user.id, total, chainVersion);
+
+    // Move the claim into the approval flow and point it at the new chain
+    await tx.claim.update({
+      where: { id: claimId },
+      data: { status: ClaimStatus.PENDING_APPROVAL, submittedAt: new Date(), currentApprovalVersion: chainVersion },
+    });
+
+    // Audit trail: written in the same transaction as the change
+    await tx.claimHistory.create({
+      data: {
+        claimId,
+        action: "CLAIM_SUBMITTED",
+        performedById: user.id,
+        metadata: { total: total.toFixed(2), levels: approvals.length, chainVersion },
+      },
+    });
+
+    return loadClaimResponse(tx, claimId);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Editing line items
 // ---------------------------------------------------------------------------
 
-// Locks the caller's claim row for the rest of the transaction and returns its status.
-// Concept: pessimistic locking (SELECT ... FOR UPDATE). Two edits, or an edit and an approval,
-// can never interleave on the same claim: the second one waits, then sees the new status.
-async function lockClaim(tx: Prisma.TransactionClient, user: AuthUser, claimId: string): Promise<ClaimStatus> {
-  const rows = await tx.$queryRaw<{ status: ClaimStatus }[]>`
-    SELECT "status" FROM "Claim"
-    WHERE "id" = ${claimId}::uuid AND "claimantId" = ${user.id}::uuid
-    FOR UPDATE`;
-  const claim = rows[0];
-
-  // Not found, or someone else's claim: the same 404 either way
-  if (!claim) {
-    throw new AppError(404, "NOT_FOUND", "Claim not found");
-  }
-
-  return claim.status;
-}
-
 // Locks the claim and checks its content can be edited (line items, title)
 async function lockEditableClaim(tx: Prisma.TransactionClient, user: AuthUser, claimId: string) {
-  const status = await lockClaim(tx, user, claimId);
+  const { status } = await lockClaim(tx, user, claimId);
 
   if (status === ClaimStatus.APPROVED) {
     throw new AppError(409, "CLAIM_LOCKED", "This claim is approved and can no longer be changed");

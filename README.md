@@ -60,6 +60,7 @@ Each user has one role. Approvers also have an `approvalLevel` (1 or 2).
 | Editing a claim that is awaiting approval (until the chain-reset phase) | 409 `CLAIM_NOT_EDITABLE` |
 | Adding a line item to a claim that already has 100 | 422 `LINE_ITEM_LIMIT_REACHED` |
 | Deleting a claim that was already submitted (pending or rejected) | 409 `CLAIM_NOT_DELETABLE` (an approved one is 409 `CLAIM_LOCKED`) |
+| Submitting a claim that is not a draft | 409 `CLAIM_NOT_SUBMITTABLE` (an approved one is 409 `CLAIM_LOCKED`) |
 | A value that must be unique already exists | 409 `CONFLICT` |
 | Submitting with no line items | 422 `NO_LINE_ITEMS` |
 | Claimant has no approver at a required level | 422 `NO_APPROVER_AVAILABLE` |
