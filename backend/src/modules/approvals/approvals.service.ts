@@ -73,6 +73,7 @@ export async function resetChain(
   newTotal: Prisma.Decimal,
 ) {
   // Void the live chain. The rows stay for the audit trail; they are just no longer decisions that count.
+  //updateMany because 2 approval llevel creates 2 records in the Approval table
   await tx.approval.updateMany({
     where: {
       claimId,
