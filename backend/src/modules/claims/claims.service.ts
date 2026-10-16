@@ -1,12 +1,12 @@
 import { prisma } from "../../db/prisma";
 import { AppError } from "../../lib/AppError";
 import { logger } from "../../lib/logger";
-import { lockClaim } from "../../lib/claimLock";
+import { lockClaim, type LockedClaim } from "../../lib/claimLock";
 import { getClaimTotal, getClaimTotals } from "../../lib/claimTotal";
 import { Prisma } from "../../generated/prisma/client";
 import { ClaimStatus } from "../../generated/prisma/enums";
 import type { AuthUser } from "../../types/express";
-import { buildChain } from "../approvals/approvals.service";
+import { buildChain, resetChain } from "../approvals/approvals.service";
 import { MAX_LINE_ITEMS } from "./claims.schemas";
 import type {
   CreateClaimInput,
@@ -145,12 +145,10 @@ export async function listClaims(user: AuthUser, query: ListClaimsQuery) {
 
 // Change the claim itself. Only the title is editable: the total is derived and the status follows the workflow.
 export async function updateClaim(user: AuthUser, claimId: string, changes: UpdateClaimInput) {
-  return prisma.$transaction(async (tx) => {
-    await lockEditableClaim(tx, user, claimId);
-
+  return runClaimEdit(user, claimId, async (tx) => {
     await tx.claim.update({ where: { id: claimId }, data: { title: changes.title } });
 
-    return loadClaimResponse(tx, claimId);
+    return { change: "title changed" };
   });
 }
 
@@ -227,18 +225,69 @@ export async function submitClaim(user: AuthUser, claimId: string) {
 // Editing line items
 // ---------------------------------------------------------------------------
 
-// Locks the claim and checks its content can be edited (line items, title)
+// Locks the claim and checks its content can be edited (line items, title).
+// Only an APPROVED claim is closed for good. A DRAFT, a REJECTED claim and a claim awaiting approval can all be edited.
 async function lockEditableClaim(tx: Prisma.TransactionClient, user: AuthUser, claimId: string) {
-  const { status } = await lockClaim(tx, user, claimId);
+  const locked = await lockClaim(tx, user, claimId);
 
-  if (status === ClaimStatus.APPROVED) {
+  if (locked.status === ClaimStatus.APPROVED) {
     throw new AppError(409, "CLAIM_LOCKED", "This claim is approved and can no longer be changed");
   }
 
-  // Editing a claim that is mid-approval must rebuild its approval chain, which comes in Phase 10
-  if (status === ClaimStatus.PENDING_APPROVAL) {
-    throw new AppError(409, "CLAIM_NOT_EDITABLE", "This claim is awaiting approval and cannot be edited yet");
-  }
+  return locked;
+}
+
+// What an edit reports back, so the history row can say what changed
+type ClaimEditResult = { change: string; itemId?: string };
+
+// The ONE flow every edit of a claim goes through (title, add / change / remove a line item), in a
+// single transaction: lock and check the claim, apply the edit, record it, return the claim as the API shows it.
+// The edit itself is passed in, so rules that apply to every edit live here once, not in four places.
+// Concept: higher-order function (a shared flow with the varying step handed in).
+async function runClaimEdit(
+  user: AuthUser,
+  claimId: string,
+  edit: (tx: Prisma.TransactionClient, locked: LockedClaim) => Promise<ClaimEditResult>,
+) {
+  return prisma.$transaction(async (tx) => {
+    const locked = await lockEditableClaim(tx, user, claimId);
+
+    // A draft has no history yet, so it skips the extra queries below
+    if (locked.status === ClaimStatus.DRAFT) {
+      await edit(tx, locked);
+      return loadClaimResponse(tx, claimId);
+    }
+
+    // Totals before and after the edit (the history row shows how the amount moved)
+    const oldTotal = await getClaimTotal(claimId, tx);
+    const result = await edit(tx, locked);
+    const newTotal = await getClaimTotal(claimId, tx);
+
+    // Audit trail: edits to a claim that was already submitted are recorded, in the same transaction
+    await tx.claimHistory.create({
+      data: {
+        claimId,
+        action: "CLAIM_UPDATED",
+        performedById: user.id,
+        metadata: {
+          change: result.change,
+          itemId: result.itemId ?? null,
+          oldTotal: oldTotal.toFixed(2),
+          newTotal: newTotal.toFixed(2),
+        },
+      },
+    });
+
+    // A new total voids every decision made so far, so the chain starts again from level 1.
+    // A rejected claim has no live chain (resubmit builds one), and an unchanged total (a title or
+    // description edit) changes nothing the approvers decided on, so neither of those resets.
+    const isPending = locked.status === ClaimStatus.PENDING_APPROVAL;
+    if (isPending && !oldTotal.equals(newTotal)) {
+      await resetChain(tx, user, claimId, locked.currentApprovalVersion, oldTotal, newTotal);
+    }
+
+    return loadClaimResponse(tx, claimId);
+  });
 }
 
 // Explicit field mapping (never spread a request body into a Prisma call)
@@ -276,25 +325,22 @@ async function loadClaimResponse(tx: Prisma.TransactionClient, claimId: string) 
 
 // Add ONE line item to a claim
 export async function addLineItem(user: AuthUser, claimId: string, item: LineItemInput) {
-  return prisma.$transaction(async (tx) => {
-    await lockEditableClaim(tx, user, claimId);
-
+  return runClaimEdit(user, claimId, async (tx) => {
     const existingCount = await tx.lineItem.count({ where: { claimId } });
     if (existingCount >= MAX_LINE_ITEMS) {
       throw new AppError(422, "LINE_ITEM_LIMIT_REACHED", `A claim can have at most ${MAX_LINE_ITEMS} line items`);
     }
 
-    await tx.lineItem.create({ data: toLineItemData(claimId, item) });
+    const created = await tx.lineItem.create({ data: toLineItemData(claimId, item) });
     await touchClaim(tx, claimId);
 
-    return loadClaimResponse(tx, claimId);
+    return { change: "line item added", itemId: created.id };
   });
 }
 
 // Change some fields of ONE line item (only the fields that are sent)
 export async function updateLineItem(user: AuthUser, claimId: string, itemId: string, changes: UpdateLineItemInput) {
-  return prisma.$transaction(async (tx) => {
-    await lockEditableClaim(tx, user, claimId);
+  return runClaimEdit(user, claimId, async (tx) => {
     await findLineItem(tx, claimId, itemId);
 
     // Prisma leaves out fields that are undefined, so only the fields that were sent are updated
@@ -309,19 +355,26 @@ export async function updateLineItem(user: AuthUser, claimId: string, itemId: st
     });
     await touchClaim(tx, claimId);
 
-    return loadClaimResponse(tx, claimId);
+    return { change: "line item changed", itemId };
   });
 }
 
 // Remove ONE line item from a claim
 export async function deleteLineItem(user: AuthUser, claimId: string, itemId: string) {
-  return prisma.$transaction(async (tx) => {
-    await lockEditableClaim(tx, user, claimId);
+  return runClaimEdit(user, claimId, async (tx, locked) => {
     await findLineItem(tx, claimId, itemId);
+
+    // A claim awaiting approval must keep at least one item (drafts and rejected claims may be emptied)
+    if (locked.status === ClaimStatus.PENDING_APPROVAL) {
+      const existingCount = await tx.lineItem.count({ where: { claimId } });
+      if (existingCount <= 1) {
+        throw new AppError(422, "NO_LINE_ITEMS", "A claim awaiting approval must keep at least one line item");
+      }
+    }
 
     await tx.lineItem.delete({ where: { id: itemId } });
     await touchClaim(tx, claimId);
 
-    return loadClaimResponse(tx, claimId);
+    return { change: "line item removed", itemId };
   });
 }
