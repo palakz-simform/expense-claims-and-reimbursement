@@ -246,3 +246,52 @@ export async function approveApproval(user: AuthUser, approvalId: string) {
     };
   });
 }
+
+// Reject my step: the claim goes back to the claimant with the reason, and the rest of the chain is voided.
+export async function rejectApproval(user: AuthUser, approvalId: string, reason: string) {
+  return prisma.$transaction(async (tx) => {
+    const { approval, claimId } = await lockDecidableApproval(tx, user, approvalId);
+
+    // Double-click guard: only a step that is still PENDING can be decided
+    const decidedAt = new Date();
+    const decided = await tx.approval.updateMany({
+      where: { id: approvalId, status: ApprovalStatus.PENDING },
+      data: { status: ApprovalStatus.REJECTED, decidedAt, reason },
+    });
+    if (decided.count === 0) {
+      throw new AppError(409, "APPROVAL_NOT_PENDING", "This approval is no longer waiting for your decision");
+    }
+
+    // The other open steps of this chain no longer matter (earlier approvals stay as they were)
+    await tx.approval.updateMany({
+      where: {
+        claimId,
+        chainVersion: approval.chainVersion,
+        status: { in: [ApprovalStatus.WAITING, ApprovalStatus.PENDING] },
+      },
+      data: { status: ApprovalStatus.INVALIDATED },
+    });
+
+    await tx.claim.update({ where: { id: claimId }, data: { status: ClaimStatus.REJECTED } });
+
+    // Audit trail: written in the same transaction as the change
+    await tx.claimHistory.create({
+      data: {
+        claimId,
+        action: "CLAIM_REJECTED",
+        performedById: user.id,
+        reason,
+        metadata: { level: approval.level, chainVersion: approval.chainVersion },
+      },
+    });
+
+    return {
+      id: approvalId,
+      level: approval.level,
+      status: ApprovalStatus.REJECTED,
+      decidedAt,
+      reason,
+      claim: { id: claimId, status: ClaimStatus.REJECTED },
+    };
+  });
+}

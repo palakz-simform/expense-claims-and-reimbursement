@@ -1,7 +1,7 @@
 import { OpenApiGeneratorV31, OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
 import { Role } from "../generated/prisma/enums";
-import { approvalIdParamsSchema, listApprovalsQuerySchema } from "../modules/approvals/approvals.schemas";
+import { approvalIdParamsSchema, listApprovalsQuerySchema, rejectApprovalSchema } from "../modules/approvals/approvals.schemas";
 import { loginSchema } from "../modules/auth/auth.schemas";
 import {
   claimIdParamsSchema,
@@ -378,6 +378,42 @@ registry.registerPath({
       },
     },
     400: errorResponse("VALIDATION_ERROR (id is not a UUID)"),
+    401: errorResponse("Missing, invalid or expired token"),
+    403: errorResponse("Not an APPROVER"),
+    404: errorResponse("No such approval, or it belongs to another approver"),
+    409: errorResponse("APPROVAL_NOT_PENDING (already decided, not your turn yet, or voided because the claim changed)"),
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/approvals/{id}/reject",
+  tags: ["Approvals"],
+  summary: "Reject your step of a claim's approval chain, with a reason (APPROVER only)",
+  description:
+    "The claim becomes REJECTED and goes back to the claimant, who can edit it. Approvals already granted stay as they were; the open steps (waiting or pending) become INVALIDATED. The reason is stored on the step and in the claim history.",
+  security: [{ [bearerAuth.name]: [] }],
+  request: {
+    params: approvalIdParamsSchema,
+    body: { content: { "application/json": { schema: rejectApprovalSchema } } },
+  },
+  responses: {
+    200: {
+      description: "The decided step, the reason, and the claim's new status",
+      content: {
+        "application/json": {
+          schema: z.object({
+            id: z.string(),
+            level: z.number().int(),
+            status: z.literal("REJECTED"),
+            decidedAt: z.string(),
+            reason: z.string(),
+            claim: z.object({ id: z.string(), status: z.literal("REJECTED") }),
+          }),
+        },
+      },
+    },
+    400: errorResponse("VALIDATION_ERROR (id is not a UUID, reason missing or blank or over 500 characters, unknown field)"),
     401: errorResponse("Missing, invalid or expired token"),
     403: errorResponse("Not an APPROVER"),
     404: errorResponse("No such approval, or it belongs to another approver"),
