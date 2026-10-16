@@ -57,6 +57,14 @@ export async function submit(req: Request, res: Response) {
   res.json(claim);
 }
 
+// POST /claims/:id/resubmit: send a rejected claim back to approval (no body)
+export async function resubmit(req: Request, res: Response) {
+  const user = req.user!;
+  const claimId = req.params.id as string;
+  const claim = await claimsService.resubmitClaim(user, claimId);
+  res.json(claim);
+}
+
 // POST /claims/:id/line-items: add one line item
 export async function addLineItem(req: Request, res: Response) {
   const user = req.user!;

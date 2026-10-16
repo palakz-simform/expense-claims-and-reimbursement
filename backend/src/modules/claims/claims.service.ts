@@ -235,6 +235,24 @@ export async function submitClaim(user: AuthUser, claimId: string) {
   });
 }
 
+// Send a REJECTED claim back to approval: a new chain starts from level 1 (old rows and history stay).
+export async function resubmitClaim(user: AuthUser, claimId: string) {
+  return prisma.$transaction(async (tx) => {
+    const { status, currentApprovalVersion } = await lockClaim(tx, user, claimId);
+
+    if (status === ClaimStatus.APPROVED) {
+      throw new AppError(409, "CLAIM_LOCKED", "This claim is approved and can no longer be changed");
+    }
+    if (status !== ClaimStatus.REJECTED) {
+      throw new AppError(409, "CLAIM_NOT_RESUBMITTABLE", "Only a rejected claim can be resubmitted");
+    }
+
+    await startApproval(tx, user, claimId, currentApprovalVersion, "CLAIM_RESUBMITTED");
+
+    return loadClaimResponse(tx, claimId);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Editing line items
 // ---------------------------------------------------------------------------

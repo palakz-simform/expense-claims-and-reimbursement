@@ -29,6 +29,7 @@ claimsRouter.delete("/:id", requireRole(Role.CLAIMANT), validate({ params: claim
 
 // Submit for approval: no body, so there is nothing for the client to tamper with
 claimsRouter.post("/:id/submit", requireRole(Role.CLAIMANT), validate({ params: claimIdParamsSchema }), controller.submit);
+claimsRouter.post("/:id/resubmit", requireRole(Role.CLAIMANT), validate({ params: claimIdParamsSchema }), controller.resubmit);
 
 // Line items: one at a time, so each change is audited and receipts stay attached to their item
 claimsRouter.post(
