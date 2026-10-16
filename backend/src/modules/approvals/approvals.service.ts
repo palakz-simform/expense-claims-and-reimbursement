@@ -1,8 +1,11 @@
+import { prisma } from "../../db/prisma";
 import { AppError } from "../../lib/AppError";
 import { requiredLevels } from "../../lib/approvalPolicy";
-import type { Prisma } from "../../generated/prisma/client";
+import { getClaimTotals } from "../../lib/claimTotal";
+import { Prisma } from "../../generated/prisma/client";
 import { ApprovalStatus, Role } from "../../generated/prisma/enums";
 import type { AuthUser } from "../../types/express";
+import type { ListApprovalsQuery } from "./approvals.schemas";
 
 // Builds the approval chain for a claim: one Approval row per required level.
 // ONE function for submit, resubmit and chain reset, so the routing rule exists in a single place.
@@ -102,4 +105,63 @@ export async function resetChain(
       },
     },
   });
+}
+
+// The approver's work queue: approvals that are waiting for MY decision right now, oldest submission first.
+// A level-2 approval stays out until level 1 approves (it is WAITING, not PENDING), and a voided or
+// already decided approval is not in the queue. The ownership filter (approverId) is IN the query,
+// so an approver never sees another approver's work. Paginated like every list.
+export async function listPendingApprovals(user: AuthUser, query: ListApprovalsQuery) {
+  const { page, pageSize } = query;
+  const where = { approverId: user.id, status: ApprovalStatus.PENDING };
+
+  // id is a tie-breaker so approvals of claims submitted at the same instant never repeat or vanish between pages
+  const [approvals, totalItems] = await prisma.$transaction([
+    prisma.approval.findMany({
+      where,
+      orderBy: [{ claim: { submittedAt: "asc" } }, { id: "asc" }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      select: {
+        id: true,
+        level: true,
+        status: true,
+        claim: {
+          select: {
+            id: true,
+            claimNumber: true,
+            title: true,
+            submittedAt: true,
+            claimant: { select: { name: true } },
+          },
+        },
+      },
+    }),
+    prisma.approval.count({ where }),
+  ]);
+
+  // All totals for this page in one query (the total is always the database's SUM of the line items)
+  const claimIds = approvals.map((approval) => approval.claim.id);
+  const totals = await getClaimTotals(claimIds, prisma);
+
+  const data = approvals.map((approval) => {
+    const total = totals.get(approval.claim.id) ?? new Prisma.Decimal(0);
+    return {
+      id: approval.id,
+      level: approval.level,
+      status: approval.status,
+      claim: {
+        id: approval.claim.id,
+        claimNumber: approval.claim.claimNumber,
+        title: approval.claim.title,
+        total: total.toFixed(2),
+        submittedAt: approval.claim.submittedAt,
+        claimantName: approval.claim.claimant.name,
+      },
+    };
+  });
+
+  const totalPages = Math.ceil(totalItems / pageSize);
+
+  return { data, pagination: { page, pageSize, totalItems, totalPages } };
 }

@@ -1,6 +1,7 @@
 import { OpenApiGeneratorV31, OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
 import { Role } from "../generated/prisma/enums";
+import { listApprovalsQuerySchema } from "../modules/approvals/approvals.schemas";
 import { loginSchema } from "../modules/auth/auth.schemas";
 import {
   claimIdParamsSchema,
@@ -297,6 +298,54 @@ registry.registerPath({
     404: errorResponse("No such claim or line item, or the claim belongs to someone else"),
     409: errorResponse("CLAIM_LOCKED (approved)"),
     422: errorResponse("NO_LINE_ITEMS (it is the last item of a claim awaiting approval)"),
+  },
+});
+
+// --- Approvals ---
+// One approval is one approver's step in a claim's chain. The queue lists only the steps that wait for the caller now.
+const approvalQueueItemSchema = z.object({
+  id: z.string(),
+  level: z.number().int(),
+  status: z.literal("PENDING"),
+  claim: z.object({
+    id: z.string(),
+    claimNumber: z.number().int(),
+    title: z.string(),
+    total: z.string(),
+    submittedAt: z.string().nullable(),
+    claimantName: z.string(),
+  }),
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/approvals",
+  tags: ["Approvals"],
+  summary: "Your approval queue: the steps waiting for YOUR decision now, oldest submission first (APPROVER only)",
+  description:
+    "A level-2 step appears only after level 1 has approved. A step that was voided (the claim was edited or rejected) or already decided is not listed. You only ever see your own steps.",
+  security: [{ [bearerAuth.name]: [] }],
+  request: { query: listApprovalsQuerySchema },
+  responses: {
+    200: {
+      description: "One page of pending approvals, each with a summary of its claim, and the pagination info",
+      content: {
+        "application/json": {
+          schema: z.object({
+            data: z.array(approvalQueueItemSchema),
+            pagination: z.object({
+              page: z.number().int(),
+              pageSize: z.number().int(),
+              totalItems: z.number().int(),
+              totalPages: z.number().int(),
+            }),
+          }),
+        },
+      },
+    },
+    400: errorResponse("VALIDATION_ERROR (page below 1, pageSize above 100, unknown query field)"),
+    401: errorResponse("Missing, invalid or expired token"),
+    403: errorResponse("Not an APPROVER"),
   },
 });
 

@@ -1186,7 +1186,64 @@
       ]
     },
     {
-      "name": "5. Should fail (negative checks)",
+      "name": "5. Approvals (run after the submit folder)",
+      "item": [
+        {
+          "name": "My approval queue (approver Ravi)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/approvals?page=1&pageSize=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "approvals"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "100"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenApprover}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Uses the approver token from the login request. Lists only approvals that wait for THIS approver now (a level-2 step appears only after level 1 approved). Needs {{claimId}} submitted in folder 4."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Has data and pagination\", function () { pm.expect(body.data).to.be.an(\"array\"); pm.expect(body.pagination).to.have.all.keys(\"page\",\"pageSize\",\"totalItems\",\"totalPages\"); });",
+                  "pm.test(\"Every entry is a PENDING step of mine with a claim summary\", function () { body.data.forEach(function (a) { pm.expect(a.status).to.eql(\"PENDING\"); pm.expect(a.claim).to.have.all.keys(\"id\",\"claimNumber\",\"title\",\"total\",\"submittedAt\",\"claimantName\"); pm.expect(a.claim.total).to.be.a(\"string\"); }); });",
+                  "pm.test(\"The claim submitted earlier is waiting for me\", function () { const ids = body.data.map(function (a) { return a.claim.id; }); pm.expect(ids).to.include(pm.collectionVariables.get(\"claimId\")); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "6. Should fail (negative checks)",
       "item": [
         {
           "name": "Auth and access",
@@ -1894,6 +1951,79 @@
                     "claims",
                     "not-a-uuid",
                     "submit"
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Status is 400\", function () { pm.response.to.have.status(400); });",
+                      "pm.test(\"Error code is VALIDATION_ERROR\", function () { pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Claimant reads the approval queue -> 403",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/approvals",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "approvals"
+                  ]
+                },
+                "description": "The queue is for approvers only (default token is the claimant's)."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Status is 403\", function () { pm.response.to.have.status(403); });",
+                      "pm.test(\"Error code is FORBIDDEN\", function () { pm.expect(pm.response.json().error.code).to.eql(\"FORBIDDEN\"); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Approval queue with pageSize 101 -> 400",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/approvals?pageSize=101",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "approvals"
+                  ],
+                  "query": [
+                    {
+                      "key": "pageSize",
+                      "value": "101"
+                    }
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tokenApprover}}",
+                      "type": "string"
+                    }
                   ]
                 }
               },
