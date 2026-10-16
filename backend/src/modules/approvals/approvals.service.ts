@@ -8,10 +8,8 @@ import { ApprovalStatus, ClaimStatus, Role } from "../../generated/prisma/enums"
 import type { AuthUser } from "../../types/express";
 import type { ListApprovalsQuery } from "./approvals.schemas";
 
-// Builds the approval chain for a claim: one Approval row per required level.
-// ONE function for submit, resubmit and chain reset, so the routing rule exists in a single place.
-// Must run inside the caller's transaction: if any level has no valid approver, the error rolls
-// back the whole submit, so a claim is never left half-submitted.
+// Builds a claim's approval chain: one Approval row per required level (used by submit, reset and resubmit).
+// Runs inside the caller's transaction, so a level without a valid approver rolls everything back.
 export async function buildChain(
   tx: Prisma.TransactionClient,
   claimId: string,
@@ -63,11 +61,8 @@ export async function buildChain(
   return approvals;
 }
 
-// Throws away the live approval chain and starts a new one from level 1. Used when an edit changes
-// the total of a claim that is awaiting approval: approvers decided on a different amount, so every
-// decision (even an already granted one) is void. The same approvers come back, because buildChain
-// reads the claimant's fixed assignments (Alice approved, Bob pending: both reset, Alice is asked again).
-// Must run inside the caller's transaction, with the claim row locked.
+// Voids the live chain and starts a new one from level 1, because the total changed under the approvers.
+// The same approvers return (they come from the claimant's fixed assignments). Needs the claim locked.
 export async function resetChain(
   tx: Prisma.TransactionClient,
   user: AuthUser,
@@ -108,10 +103,7 @@ export async function resetChain(
   });
 }
 
-// The approver's work queue: approvals that are waiting for MY decision right now, oldest submission first.
-// A level-2 approval stays out until level 1 approves (it is WAITING, not PENDING), and a voided or
-// already decided approval is not in the queue. The ownership filter (approverId) is IN the query,
-// so an approver never sees another approver's work. Paginated like every list.
+// The approver's queue: only steps waiting for MY decision now, oldest submission first (approverId is in the query).
 export async function listPendingApprovals(user: AuthUser, query: ListApprovalsQuery) {
   const { page, pageSize } = query;
   const where = { approverId: user.id, status: ApprovalStatus.PENDING };
