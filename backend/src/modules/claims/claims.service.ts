@@ -1,7 +1,7 @@
 import { prisma } from "../../db/prisma";
 import { AppError } from "../../lib/AppError";
 import { logger } from "../../lib/logger";
-import { lockClaim } from "../../lib/claimLock";
+import { lockClaim, type LockedClaim } from "../../lib/claimLock";
 import { getClaimTotal, getClaimTotals } from "../../lib/claimTotal";
 import { Prisma } from "../../generated/prisma/client";
 import { ClaimStatus } from "../../generated/prisma/enums";
@@ -247,20 +247,20 @@ type ClaimEditResult = { change: string; itemId?: string };
 async function runClaimEdit(
   user: AuthUser,
   claimId: string,
-  edit: (tx: Prisma.TransactionClient) => Promise<ClaimEditResult>,
+  edit: (tx: Prisma.TransactionClient, locked: LockedClaim) => Promise<ClaimEditResult>,
 ) {
   return prisma.$transaction(async (tx) => {
     const locked = await lockEditableClaim(tx, user, claimId);
 
     // A draft has no history yet, so it skips the extra queries below
     if (locked.status === ClaimStatus.DRAFT) {
-      await edit(tx);
+      await edit(tx, locked);
       return loadClaimResponse(tx, claimId);
     }
 
     // Totals before and after the edit (the history row shows how the amount moved)
     const oldTotal = await getClaimTotal(claimId, tx);
-    const result = await edit(tx);
+    const result = await edit(tx, locked);
     const newTotal = await getClaimTotal(claimId, tx);
 
     // Audit trail: edits to a claim that was already submitted are recorded, in the same transaction
@@ -361,8 +361,16 @@ export async function updateLineItem(user: AuthUser, claimId: string, itemId: st
 
 // Remove ONE line item from a claim
 export async function deleteLineItem(user: AuthUser, claimId: string, itemId: string) {
-  return runClaimEdit(user, claimId, async (tx) => {
+  return runClaimEdit(user, claimId, async (tx, locked) => {
     await findLineItem(tx, claimId, itemId);
+
+    // A claim awaiting approval must keep at least one item (drafts and rejected claims may be emptied)
+    if (locked.status === ClaimStatus.PENDING_APPROVAL) {
+      const existingCount = await tx.lineItem.count({ where: { claimId } });
+      if (existingCount <= 1) {
+        throw new AppError(422, "NO_LINE_ITEMS", "A claim awaiting approval must keep at least one line item");
+      }
+    }
 
     await tx.lineItem.delete({ where: { id: itemId } });
     await touchClaim(tx, claimId);
