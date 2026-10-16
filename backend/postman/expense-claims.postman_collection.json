@@ -102,6 +102,26 @@
     {
       "key": "rejectApprovalId",
       "value": ""
+    },
+    {
+      "key": "approver2Email",
+      "value": "meera.l2@example.com"
+    },
+    {
+      "key": "tokenApprover2",
+      "value": ""
+    },
+    {
+      "key": "twoLevelClaimId",
+      "value": ""
+    },
+    {
+      "key": "twoL1ApprovalId",
+      "value": ""
+    },
+    {
+      "key": "twoL2ApprovalId",
+      "value": ""
     }
   ],
   "item": [
@@ -287,6 +307,55 @@
                   "const body = pm.response.json();",
                   "pm.collectionVariables.set(\"tokenApprover\", body.token);",
                   "pm.test(\"Response has a token and the user\", function () { pm.expect(body.token).to.be.a(\"string\"); pm.expect(body.user.email).to.eql(pm.variables.get(\"approverEmail\")); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login as level-2 approver (Meera)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Saves the level-2 approver's token in {{tokenApprover2}}. Meera only gets a step after Ravi (level 1) approved.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{approver2Email}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set(\"tokenApprover2\", body.token);",
+                  "pm.test(\"Response has a token and the level-2 approver\", function () { pm.expect(body.token).to.be.a(\"string\"); pm.expect(body.user.email).to.eql(pm.variables.get(\"approver2Email\")); pm.expect(body.user.approvalLevel).to.eql(2); });"
                 ]
               }
             }
@@ -1705,6 +1774,394 @@
               }
             }
           ]
+        },
+        {
+          "name": "Two levels: create a 12,000 claim",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/claims",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Postman two-level claim\",\n  \"lineItems\": [\n    {\n      \"date\": \"{{today}}\",\n      \"category\": \"TRAVEL\",\n      \"amount\": \"6000.00\",\n      \"description\": \"Flight\"\n    },\n    {\n      \"date\": \"{{today}}\",\n      \"category\": \"ACCOMMODATION\",\n      \"amount\": \"6000.00\",\n      \"description\": \"Hotel\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "From 10,000 up a claim needs two levels. Note: this flow ends with an APPROVED claim, which the database locks for good, so every run leaves one approved claim behind."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 201\", function () { pm.response.to.have.status(201); });",
+                  "pm.collectionVariables.set(\"twoLevelClaimId\", pm.response.json().id);",
+                  "pm.test(\"Total is 12000.00\", function () { pm.expect(pm.response.json().total).to.eql(\"12000.00\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Two levels: submit it",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{twoLevelClaimId}}/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{twoLevelClaimId}}",
+                "submit"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Two levels: level-2 approver does not see it yet",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/approvals?page=1&pageSize=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "approvals"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "100"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenApprover2}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Not in the level-2 queue while level 1 is open\", function () { const ids = pm.response.json().data.map(function (a) { return a.claim.id; }); pm.expect(ids).to.not.include(pm.collectionVariables.get(\"twoLevelClaimId\")); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Two levels: level-1 approver finds the step",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/approvals?page=1&pageSize=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "approvals"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "100"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenApprover}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Saves {{twoL1ApprovalId}}."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "const mine = pm.response.json().data.find(function (a) { return a.claim.id === pm.collectionVariables.get(\"twoLevelClaimId\"); });",
+                  "pm.test(\"A level-1 step is waiting for Ravi\", function () { pm.expect(mine).to.not.eql(undefined); pm.expect(mine.level).to.eql(1); });",
+                  "if (mine) { pm.collectionVariables.set(\"twoL1ApprovalId\", mine.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Two levels: level 1 approves",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/approvals/{{twoL1ApprovalId}}/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "approvals",
+                "{{twoL1ApprovalId}}",
+                "approve"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenApprover}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Level 1 approved, the claim is still pending\", function () { const b = pm.response.json(); pm.expect(b.level).to.eql(1); pm.expect(b.claim.status).to.eql(\"PENDING_APPROVAL\"); pm.expect(b.claim.approvedAt).to.eql(null); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Two levels: level-2 approver now finds the step",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/approvals?page=1&pageSize=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "approvals"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "100"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenApprover2}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Saves {{twoL2ApprovalId}}."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "const mine = pm.response.json().data.find(function (a) { return a.claim.id === pm.collectionVariables.get(\"twoLevelClaimId\"); });",
+                  "pm.test(\"A level-2 step is waiting for Meera\", function () { pm.expect(mine).to.not.eql(undefined); pm.expect(mine.level).to.eql(2); });",
+                  "if (mine) { pm.collectionVariables.set(\"twoL2ApprovalId\", mine.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Two levels: level 2 approves -> claim APPROVED",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/approvals/{{twoL2ApprovalId}}/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "approvals",
+                "{{twoL2ApprovalId}}",
+                "approve"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenApprover2}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Last level approved: the claim is approved\", function () { const b = pm.response.json(); pm.expect(b.level).to.eql(2); pm.expect(b.claim.status).to.eql(\"APPROVED\"); pm.expect(b.claim.approvedAt).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Two levels: level 2 approves again -> 409",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/approvals/{{twoL2ApprovalId}}/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "approvals",
+                "{{twoL2ApprovalId}}",
+                "approve"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenApprover2}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 409\", function () { pm.response.to.have.status(409); });",
+                  "pm.test(\"Error code is APPROVAL_NOT_PENDING\", function () { pm.expect(pm.response.json().error.code).to.eql(\"APPROVAL_NOT_PENDING\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Two levels: claimant edits the approved claim -> 409 CLAIM_LOCKED",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{twoLevelClaimId}}/line-items",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{twoLevelClaimId}}",
+                "line-items"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"{{today}}\",\n  \"category\": \"MEALS\",\n  \"amount\": \"10.00\",\n  \"description\": \"Too late\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "An approved claim is locked (service rule, with a database trigger behind it). Uses the claimant token (the default)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 409\", function () { pm.response.to.have.status(409); });",
+                  "pm.test(\"Error code is CLAIM_LOCKED\", function () { pm.expect(pm.response.json().error.code).to.eql(\"CLAIM_LOCKED\"); });"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -2821,6 +3278,47 @@
                     "exec": [
                       "pm.test(\"Status is 400\", function () { pm.response.to.have.status(400); });",
                       "pm.test(\"Error code is VALIDATION_ERROR\", function () { pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Level-2 approver approves a level-1 step -> 404",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/approvals/{{twoL1ApprovalId}}/approve",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "approvals",
+                    "{{twoL1ApprovalId}}",
+                    "approve"
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tokenApprover2}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "description": "Someone else's step looks the same as a missing one."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Status is 404\", function () { pm.response.to.have.status(404); });",
+                      "pm.test(\"Error code is NOT_FOUND\", function () { pm.expect(pm.response.json().error.code).to.eql(\"NOT_FOUND\"); });"
                     ]
                   }
                 }
