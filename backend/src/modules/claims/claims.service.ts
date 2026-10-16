@@ -4,7 +4,7 @@ import { logger } from "../../lib/logger";
 import { lockClaim, type LockedClaim } from "../../lib/claimLock";
 import { getClaimTotal, getClaimTotals } from "../../lib/claimTotal";
 import { Prisma } from "../../generated/prisma/client";
-import { ClaimStatus } from "../../generated/prisma/enums";
+import { ApprovalStatus, ClaimStatus } from "../../generated/prisma/enums";
 import type { AuthUser } from "../../types/express";
 import { buildChain, resetChain } from "../approvals/approvals.service";
 import { MAX_LINE_ITEMS } from "./claims.schemas";
@@ -105,7 +105,20 @@ export async function getClaim(user: AuthUser, id: string) {
 
       const total = await getClaimTotal(claim.id, tx);
 
-      return toClaimResponse(claim, total);
+      // The latest rejection, kept even after a resubmit (null if the claim was never rejected)
+      const rejection = await tx.approval.findFirst({
+        where: { claimId: claim.id, status: ApprovalStatus.REJECTED },
+        orderBy: { chainVersion: "desc" },
+        select: { reason: true, level: true, decidedAt: true, approver: { select: { name: true } } },
+      });
+      const lastRejection = rejection && {
+        reason: rejection.reason,
+        level: rejection.level,
+        rejectedAt: rejection.decidedAt,
+        rejectedBy: rejection.approver.name,
+      };
+
+      return { ...toClaimResponse(claim, total), lastRejection };
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }, // RepeatableRead ensures all queries in the transaction see the same consistent snapshot, even if other transactions modify the data.
   );
