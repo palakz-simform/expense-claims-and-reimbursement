@@ -1776,6 +1776,177 @@
           ]
         },
         {
+          "name": "Rejected claim shows why it was rejected",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{rejectClaimId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{rejectClaimId}}"
+              ]
+            },
+            "description": "GET /claims/:id returns lastRejection whenever the claim has ever been rejected."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "const lr = pm.response.json().lastRejection;",
+                  "pm.test(\"lastRejection has the reason, level and who rejected it\", function () { pm.expect(pm.response.json().status).to.eql(\"REJECTED\"); pm.expect(lr.reason).to.eql(\"Receipt is missing\"); pm.expect(lr.level).to.eql(1); pm.expect(lr.rejectedBy).to.be.a(\"string\"); pm.expect(lr.rejectedAt).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Resubmit the rejected claim -> 200",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{rejectClaimId}}/resubmit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{rejectClaimId}}",
+                "resubmit"
+              ]
+            },
+            "description": "Starts a new approval chain from level 1 with the same approvers. The first submittedAt and the earlier approvals are kept."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Back to pending approval\", function () { pm.expect(pm.response.json().status).to.eql(\"PENDING_APPROVAL\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Resubmit again -> 409 CLAIM_NOT_RESUBMITTABLE",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{rejectClaimId}}/resubmit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{rejectClaimId}}",
+                "resubmit"
+              ]
+            },
+            "description": "Only a rejected claim can be resubmitted."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 409\", function () { pm.response.to.have.status(409); });",
+                  "pm.test(\"Error code is CLAIM_NOT_RESUBMITTABLE\", function () { pm.expect(pm.response.json().error.code).to.eql(\"CLAIM_NOT_RESUBMITTABLE\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "The rejection is still shown after the resubmit",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{rejectClaimId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{rejectClaimId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "const lr = pm.response.json().lastRejection;",
+                  "pm.test(\"Pending again, but the last rejection is kept\", function () { pm.expect(pm.response.json().status).to.eql(\"PENDING_APPROVAL\"); pm.expect(lr.reason).to.eql(\"Receipt is missing\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "The approver sees the resubmitted claim again",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/approvals?page=1&pageSize=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "approvals"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "100"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenApprover}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Back in the approver queue\", function () { const ids = pm.response.json().data.map(function (a) { return a.claim.id; }); pm.expect(ids).to.include(pm.collectionVariables.get(\"rejectClaimId\")); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Two levels: create a 12,000 claim",
           "request": {
             "method": "POST",
@@ -3319,6 +3490,117 @@
                     "exec": [
                       "pm.test(\"Status is 404\", function () { pm.response.to.have.status(404); });",
                       "pm.test(\"Error code is NOT_FOUND\", function () { pm.expect(pm.response.json().error.code).to.eql(\"NOT_FOUND\"); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Resubmit a draft -> 409 CLAIM_NOT_RESUBMITTABLE",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/claims/{{emptyDraftId}}/resubmit",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "claims",
+                    "{{emptyDraftId}}",
+                    "resubmit"
+                  ]
+                },
+                "description": "Uses the empty draft from the submit folder. Only a rejected claim can be resubmitted."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Status is 409\", function () { pm.response.to.have.status(409); });",
+                      "pm.test(\"Error code is CLAIM_NOT_RESUBMITTABLE\", function () { pm.expect(pm.response.json().error.code).to.eql(\"CLAIM_NOT_RESUBMITTABLE\"); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Another claimant resubmits my claim -> 404",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/claims/{{rejectClaimId}}/resubmit",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "claims",
+                    "{{rejectClaimId}}",
+                    "resubmit"
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tokenOther}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Status is 404\", function () { pm.response.to.have.status(404); });",
+                      "pm.test(\"Error code is NOT_FOUND\", function () { pm.expect(pm.response.json().error.code).to.eql(\"NOT_FOUND\"); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Approver resubmits a claim -> 403",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/claims/{{rejectClaimId}}/resubmit",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "claims",
+                    "{{rejectClaimId}}",
+                    "resubmit"
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tokenApprover}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Status is 403\", function () { pm.response.to.have.status(403); });",
+                      "pm.test(\"Error code is FORBIDDEN\", function () { pm.expect(pm.response.json().error.code).to.eql(\"FORBIDDEN\"); });"
                     ]
                   }
                 }
