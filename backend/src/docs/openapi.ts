@@ -184,7 +184,7 @@ registry.registerPath({
   method: "patch",
   path: "/claims/{id}",
   tags: ["Claims"],
-  summary: "Change your claim's title (DRAFT or REJECTED only)",
+  summary: "Change your claim's title (any status except APPROVED; the total does not change, so no approval reset)",
   security: [{ [bearerAuth.name]: [] }],
   request: {
     params: claimIdParamsSchema,
@@ -196,7 +196,7 @@ registry.registerPath({
     401: errorResponse("Missing, invalid or expired token"),
     403: errorResponse("Not a CLAIMANT"),
     404: errorResponse("No such claim, or it belongs to someone else"),
-    409: errorResponse("CLAIM_LOCKED (approved) or CLAIM_NOT_EDITABLE (awaiting approval)"),
+    409: errorResponse("CLAIM_LOCKED (approved)"),
   },
 });
 
@@ -239,7 +239,9 @@ registry.registerPath({
   method: "post",
   path: "/claims/{id}/line-items",
   tags: ["Claims"],
-  summary: "Add ONE line item to your claim (DRAFT or REJECTED only)",
+  summary: "Add ONE line item to your claim (any status except APPROVED)",
+  description:
+    "On a claim awaiting approval, a changed total voids every approval so far: the approval chain restarts from level 1 (same approvers, new chainVersion). Edits to a submitted claim are recorded in the claim history.",
   security: [{ [bearerAuth.name]: [] }],
   request: {
     params: claimIdParamsSchema,
@@ -251,7 +253,7 @@ registry.registerPath({
     401: errorResponse("Missing, invalid or expired token"),
     403: errorResponse("Not a CLAIMANT"),
     404: errorResponse("No such claim, or it belongs to someone else"),
-    409: errorResponse("CLAIM_LOCKED (approved) or CLAIM_NOT_EDITABLE (awaiting approval)"),
+    409: errorResponse("CLAIM_LOCKED (approved)"),
     422: errorResponse("LINE_ITEM_LIMIT_REACHED (the claim already has 100 items)"),
   },
 });
@@ -260,7 +262,9 @@ registry.registerPath({
   method: "patch",
   path: "/claims/{id}/line-items/{itemId}",
   tags: ["Claims"],
-  summary: "Change some fields of ONE line item (DRAFT or REJECTED claims only)",
+  summary: "Change some fields of ONE line item (any status except APPROVED)",
+  description:
+    "On a claim awaiting approval, a changed total (not a description, date or category change) voids every approval so far: the approval chain restarts from level 1 (same approvers, new chainVersion). Edits to a submitted claim are recorded in the claim history.",
   security: [{ [bearerAuth.name]: [] }],
   request: {
     params: lineItemParamsSchema,
@@ -272,7 +276,7 @@ registry.registerPath({
     401: errorResponse("Missing, invalid or expired token"),
     403: errorResponse("Not a CLAIMANT"),
     404: errorResponse("No such claim or line item, or the claim belongs to someone else"),
-    409: errorResponse("CLAIM_LOCKED (approved) or CLAIM_NOT_EDITABLE (awaiting approval)"),
+    409: errorResponse("CLAIM_LOCKED (approved)"),
   },
 });
 
@@ -280,7 +284,9 @@ registry.registerPath({
   method: "delete",
   path: "/claims/{id}/line-items/{itemId}",
   tags: ["Claims"],
-  summary: "Remove ONE line item (DRAFT or REJECTED claims only)",
+  summary: "Remove ONE line item (any status except APPROVED)",
+  description:
+    "On a claim awaiting approval, removing an item changes the total, so the approval chain restarts from level 1 (same approvers, new chainVersion). The last item of a claim awaiting approval cannot be removed. Edits to a submitted claim are recorded in the claim history.",
   security: [{ [bearerAuth.name]: [] }],
   request: { params: lineItemParamsSchema },
   responses: {
@@ -289,7 +295,8 @@ registry.registerPath({
     401: errorResponse("Missing, invalid or expired token"),
     403: errorResponse("Not a CLAIMANT"),
     404: errorResponse("No such claim or line item, or the claim belongs to someone else"),
-    409: errorResponse("CLAIM_LOCKED (approved) or CLAIM_NOT_EDITABLE (awaiting approval)"),
+    409: errorResponse("CLAIM_LOCKED (approved)"),
+    422: errorResponse("NO_LINE_ITEMS (it is the last item of a claim awaiting approval)"),
   },
 });
 

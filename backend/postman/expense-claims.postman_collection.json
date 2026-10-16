@@ -74,6 +74,22 @@
     {
       "key": "emptyDraftId",
       "value": ""
+    },
+    {
+      "key": "submitItemId",
+      "value": ""
+    },
+    {
+      "key": "submitTotal",
+      "value": ""
+    },
+    {
+      "key": "oneItemClaimId",
+      "value": ""
+    },
+    {
+      "key": "oneItemId",
+      "value": ""
     }
   ],
   "item": [
@@ -752,7 +768,10 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
-                  "pm.test(\"Now pending approval, submittedAt set, total unchanged\", function () { const c = pm.response.json(); pm.expect(c.status).to.eql(\"PENDING_APPROVAL\"); pm.expect(c.submittedAt).to.not.eql(null); pm.expect(c.total).to.be.a(\"string\"); });"
+                  "const claim = pm.response.json();",
+                  "pm.collectionVariables.set(\"submitItemId\", claim.lineItems[0].id);",
+                  "pm.collectionVariables.set(\"submitTotal\", claim.total);",
+                  "pm.test(\"Now pending approval, submittedAt set, total is a string\", function () { pm.expect(claim.status).to.eql(\"PENDING_APPROVAL\"); pm.expect(claim.submittedAt).to.not.eql(null); pm.expect(claim.total).to.be.a(\"string\"); });"
                 ]
               }
             }
@@ -790,7 +809,7 @@
           ]
         },
         {
-          "name": "Edit the submitted claim -> 409 CLAIM_NOT_EDITABLE",
+          "name": "Rename the submitted claim -> 200 (title only, total unchanged)",
           "request": {
             "method": "PATCH",
             "header": [
@@ -811,14 +830,14 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Should not change\"\n}",
+              "raw": "{\n  \"title\": \"Postman test claim (renamed while pending)\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "A claim awaiting approval is read-only until the chain-reset phase."
+            "description": "A claim awaiting approval can be edited. A title change does not change the total, so the approval chain is NOT reset."
           },
           "event": [
             {
@@ -826,8 +845,54 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"Status is 409\", function () { pm.response.to.have.status(409); });",
-                  "pm.test(\"Error code is CLAIM_NOT_EDITABLE\", function () { pm.expect(pm.response.json().error.code).to.eql(\"CLAIM_NOT_EDITABLE\"); });"
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Still pending, title changed, total unchanged\", function () { const c = pm.response.json(); pm.expect(c.status).to.eql(\"PENDING_APPROVAL\"); pm.expect(c.title).to.eql(\"Postman test claim (renamed while pending)\"); pm.expect(c.total).to.eql(pm.collectionVariables.get(\"submitTotal\")); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Change an item's amount on the submitted claim -> 200 (chain reset)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{claimId}}/line-items/{{submitItemId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{claimId}}",
+                "line-items",
+                "{{submitItemId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"777.77\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "The total changes, so every approval so far is void and the chain restarts from level 1 (same approvers, new chainVersion; two history rows: CLAIM_UPDATED and APPROVAL_CHAIN_RESET). No endpoint shows approvals yet, so this request checks the new total."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Still pending, new amount and a different total\", function () { const c = pm.response.json(); pm.expect(c.status).to.eql(\"PENDING_APPROVAL\"); const item = c.lineItems.find(function (i) { return i.id === pm.collectionVariables.get(\"submitItemId\"); }); pm.expect(item.amount).to.eql(\"777.77\"); pm.expect(c.total).to.not.eql(pm.collectionVariables.get(\"submitTotal\")); });"
                 ]
               }
             }
@@ -931,6 +996,188 @@
                 "exec": [
                   "pm.test(\"Status is 422\", function () { pm.response.to.have.status(422); });",
                   "pm.test(\"Error code is NO_LINE_ITEMS\", function () { pm.expect(pm.response.json().error.code).to.eql(\"NO_LINE_ITEMS\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create a one-item claim (for the last-item rule)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/claims",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Postman one-item claim\",\n  \"lineItems\": [\n    {\n      \"date\": \"{{today}}\",\n      \"category\": \"MEALS\",\n      \"amount\": \"40.00\",\n      \"description\": \"Lunch\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Saves {{oneItemClaimId}} and {{oneItemId}}."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 201\", function () { pm.response.to.have.status(201); });",
+                  "const claim = pm.response.json();",
+                  "pm.collectionVariables.set(\"oneItemClaimId\", claim.id);",
+                  "pm.collectionVariables.set(\"oneItemId\", claim.lineItems[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Submit the one-item claim",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{oneItemClaimId}}/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{oneItemClaimId}}",
+                "submit"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remove its only item -> 422 NO_LINE_ITEMS",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{oneItemClaimId}}/line-items/{{oneItemId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{oneItemClaimId}}",
+                "line-items",
+                "{{oneItemId}}"
+              ]
+            },
+            "description": "A claim awaiting approval must keep at least one line item. Nothing changes (the chain is not reset)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 422\", function () { pm.response.to.have.status(422); });",
+                  "pm.test(\"Error code is NO_LINE_ITEMS\", function () { pm.expect(pm.response.json().error.code).to.eql(\"NO_LINE_ITEMS\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Add a second item to the pending claim -> 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{oneItemClaimId}}/line-items",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{oneItemClaimId}}",
+                "line-items"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"{{today}}\",\n  \"category\": \"TRANSPORT\",\n  \"amount\": \"25.00\",\n  \"description\": \"Taxi\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 201\", function () { pm.response.to.have.status(201); });",
+                  "pm.test(\"Two items, total 65.00\", function () { const c = pm.response.json(); pm.expect(c.lineItems.length).to.eql(2); pm.expect(c.total).to.eql(\"65.00\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Now remove the first item -> 200",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{oneItemClaimId}}/line-items/{{oneItemId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{oneItemClaimId}}",
+                "line-items",
+                "{{oneItemId}}"
+              ]
+            },
+            "description": "Allowed, because another item remains."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"One item left, total 25.00\", function () { const c = pm.response.json(); pm.expect(c.lineItems.length).to.eql(1); pm.expect(c.total).to.eql(\"25.00\"); });"
                 ]
               }
             }
