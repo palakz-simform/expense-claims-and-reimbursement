@@ -173,14 +173,55 @@ export async function deleteClaim(user: AuthUser, claimId: string) {
   logger.info({ claimId, userId: user.id }, "Draft claim deleted");
 }
 
-// Submit a DRAFT claim for approval. Everything below is ONE transaction: the status change, the
-// approval chain and the history row are saved together or not at all.
+// Shared by submit and resubmit: builds the next approval chain and moves the claim into approval.
+// Must run in the caller's transaction with the claim locked. submittedAt is set once, on the first submit.
+async function startApproval(
+  tx: Prisma.TransactionClient,
+  user: AuthUser,
+  claimId: string,
+  currentApprovalVersion: number,
+  action: "CLAIM_SUBMITTED" | "CLAIM_RESUBMITTED",
+) {
+  // A claim with nothing to approve cannot be sent (a total of 0 is not the same as no items)
+  const itemCount = await tx.lineItem.count({ where: { claimId } });
+  if (itemCount === 0) {
+    throw new AppError(422, "NO_LINE_ITEMS", "A claim needs at least one line item before it can be submitted");
+  }
+
+  // The chain is built for the new version; the total comes from the database, never from the client
+  const total = await getClaimTotal(claimId, tx);
+  const chainVersion = currentApprovalVersion + 1;
+  const approvals = await buildChain(tx, claimId, user.id, total, chainVersion);
+
+  // Move the claim into the approval flow and point it at the new chain
+  const firstSubmit = action === "CLAIM_SUBMITTED";
+  await tx.claim.update({
+    where: { id: claimId },
+    data: {
+      status: ClaimStatus.PENDING_APPROVAL,
+      currentApprovalVersion: chainVersion,
+      ...(firstSubmit && { submittedAt: new Date() }),
+    },
+  });
+
+  // Audit trail: written in the same transaction as the change
+  await tx.claimHistory.create({
+    data: {
+      claimId,
+      action,
+      performedById: user.id,
+      metadata: { total: total.toFixed(2), levels: approvals.length, chainVersion },
+    },
+  });
+}
+
+// Submit a DRAFT claim for approval, in ONE transaction (status, approval chain and history together).
 export async function submitClaim(user: AuthUser, claimId: string) {
   return prisma.$transaction(async (tx) => {
     // Lock first, so a double click or a concurrent edit waits and then sees the new status
     const { status, currentApprovalVersion } = await lockClaim(tx, user, claimId);
 
-    // Only a draft can be submitted (a rejected claim goes through resubmit, which comes in Phase 12)
+    // Only a draft can be submitted (a rejected claim goes through resubmit)
     if (status === ClaimStatus.APPROVED) {
       throw new AppError(409, "CLAIM_LOCKED", "This claim is approved and can no longer be changed");
     }
@@ -188,32 +229,7 @@ export async function submitClaim(user: AuthUser, claimId: string) {
       throw new AppError(409, "CLAIM_NOT_SUBMITTABLE", "Only a draft claim can be submitted");
     }
 
-    // A claim with nothing to approve cannot be submitted (a total of 0 is not the same as no items)
-    const itemCount = await tx.lineItem.count({ where: { claimId } });
-    if (itemCount === 0) {
-      throw new AppError(422, "NO_LINE_ITEMS", "A claim needs at least one line item before it can be submitted");
-    }
-
-    // The chain is built for the new version; the total comes from the database, never from the client
-    const total = await getClaimTotal(claimId, tx);
-    const chainVersion = currentApprovalVersion + 1;
-    const approvals = await buildChain(tx, claimId, user.id, total, chainVersion);
-
-    // Move the claim into the approval flow and point it at the new chain
-    await tx.claim.update({
-      where: { id: claimId },
-      data: { status: ClaimStatus.PENDING_APPROVAL, submittedAt: new Date(), currentApprovalVersion: chainVersion },
-    });
-
-    // Audit trail: written in the same transaction as the change
-    await tx.claimHistory.create({
-      data: {
-        claimId,
-        action: "CLAIM_SUBMITTED",
-        performedById: user.id,
-        metadata: { total: total.toFixed(2), levels: approvals.length, chainVersion },
-      },
-    });
+    await startApproval(tx, user, claimId, currentApprovalVersion, "CLAIM_SUBMITTED");
 
     return loadClaimResponse(tx, claimId);
   });
