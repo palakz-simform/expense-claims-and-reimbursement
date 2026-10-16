@@ -1,7 +1,7 @@
 import { OpenApiGeneratorV31, OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
 import { Role } from "../generated/prisma/enums";
-import { listApprovalsQuerySchema } from "../modules/approvals/approvals.schemas";
+import { approvalIdParamsSchema, listApprovalsQuerySchema } from "../modules/approvals/approvals.schemas";
 import { loginSchema } from "../modules/auth/auth.schemas";
 import {
   claimIdParamsSchema,
@@ -346,6 +346,42 @@ registry.registerPath({
     400: errorResponse("VALIDATION_ERROR (page below 1, pageSize above 100, unknown query field)"),
     401: errorResponse("Missing, invalid or expired token"),
     403: errorResponse("Not an APPROVER"),
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/approvals/{id}/approve",
+  tags: ["Approvals"],
+  summary: "Approve your step of a claim's approval chain (APPROVER only)",
+  description:
+    "If a higher level exists, its step becomes PENDING and the claim stays PENDING_APPROVAL. If this was the last level, the claim becomes APPROVED (and locked). Both are recorded in the claim history.",
+  security: [{ [bearerAuth.name]: [] }],
+  request: { params: approvalIdParamsSchema },
+  responses: {
+    200: {
+      description: "The decided step and the claim's status after it",
+      content: {
+        "application/json": {
+          schema: z.object({
+            id: z.string(),
+            level: z.number().int(),
+            status: z.literal("APPROVED"),
+            decidedAt: z.string(),
+            claim: z.object({
+              id: z.string(),
+              status: z.enum(["PENDING_APPROVAL", "APPROVED"]),
+              approvedAt: z.string().nullable(),
+            }),
+          }),
+        },
+      },
+    },
+    400: errorResponse("VALIDATION_ERROR (id is not a UUID)"),
+    401: errorResponse("Missing, invalid or expired token"),
+    403: errorResponse("Not an APPROVER"),
+    404: errorResponse("No such approval, or it belongs to another approver"),
+    409: errorResponse("APPROVAL_NOT_PENDING (already decided, not your turn yet, or voided because the claim changed)"),
   },
 });
 

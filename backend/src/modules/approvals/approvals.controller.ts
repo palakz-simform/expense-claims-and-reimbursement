@@ -9,3 +9,11 @@ export async function list(req: Request, res: Response) {
   const result = await approvalsService.listPendingApprovals(user, query);
   res.json(result);
 }
+
+// POST /approvals/:id/approve: no body, the server decides everything
+export async function approve(req: Request, res: Response) {
+  const user = req.user!;
+  const approvalId = req.params.id as string;
+  const result = await approvalsService.approveApproval(user, approvalId);
+  res.json(result);
+}

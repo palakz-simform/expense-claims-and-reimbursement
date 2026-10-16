@@ -1,9 +1,10 @@
 import { prisma } from "../../db/prisma";
 import { AppError } from "../../lib/AppError";
 import { requiredLevels } from "../../lib/approvalPolicy";
-import { getClaimTotals } from "../../lib/claimTotal";
+import { lockClaimById } from "../../lib/claimLock";
+import { getClaimTotal, getClaimTotals } from "../../lib/claimTotal";
 import { Prisma } from "../../generated/prisma/client";
-import { ApprovalStatus, Role } from "../../generated/prisma/enums";
+import { ApprovalStatus, ClaimStatus, Role } from "../../generated/prisma/enums";
 import type { AuthUser } from "../../types/express";
 import type { ListApprovalsQuery } from "./approvals.schemas";
 
@@ -164,4 +165,84 @@ export async function listPendingApprovals(user: AuthUser, query: ListApprovalsQ
   const totalPages = Math.ceil(totalItems / pageSize);
 
   return { data, pagination: { page, pageSize, totalItems, totalPages } };
+}
+
+// Shared by approve and reject: finds MY approval, locks its claim, checks the step can still be decided.
+async function lockDecidableApproval(tx: Prisma.TransactionClient, user: AuthUser, approvalId: string) {
+  // Someone else's approval looks exactly like a missing one (404)
+  const mine = await tx.approval.findFirst({ where: { id: approvalId, approverId: user.id }, select: { claimId: true } });
+  if (!mine) {
+    throw new AppError(404, "NOT_FOUND", "Approval not found");
+  }
+
+  // Lock first (claim id comes from my own approval), then re-read: the step may have changed while we waited
+  const claim = await lockClaimById(tx, mine.claimId);
+  const approval = await tx.approval.findUniqueOrThrow({ where: { id: approvalId } });
+
+  // It must be my turn, on the live chain of a claim that is still awaiting approval
+  const isLive = claim.status === ClaimStatus.PENDING_APPROVAL && approval.chainVersion === claim.currentApprovalVersion;
+  if (approval.status !== ApprovalStatus.PENDING || !isLive) {
+    throw new AppError(409, "APPROVAL_NOT_PENDING", "This approval is no longer waiting for your decision");
+  }
+
+  return { approval, claimId: mine.claimId };
+}
+
+// Approve my step: the next level's turn starts, or the claim is approved when this was the last level.
+export async function approveApproval(user: AuthUser, approvalId: string) {
+  return prisma.$transaction(async (tx) => {
+    const { approval, claimId } = await lockDecidableApproval(tx, user, approvalId);
+
+    // Double-click guard: only a step that is still PENDING can be decided
+    const decidedAt = new Date();
+    const decided = await tx.approval.updateMany({
+      where: { id: approvalId, status: ApprovalStatus.PENDING },
+      data: { status: ApprovalStatus.APPROVED, decidedAt },
+    });
+    if (decided.count === 0) {
+      throw new AppError(409, "APPROVAL_NOT_PENDING", "This approval is no longer waiting for your decision");
+    }
+
+    // Audit trail: written in the same transaction as the change
+    await tx.claimHistory.create({
+      data: {
+        claimId,
+        action: "APPROVAL_GRANTED",
+        performedById: user.id,
+        metadata: { level: approval.level, chainVersion: approval.chainVersion },
+      },
+    });
+
+    // The next level of this chain, or null if this was the last
+    const next = await tx.approval.findFirst({
+      where: { claimId, chainVersion: approval.chainVersion, level: approval.level + 1 },
+      select: { id: true },
+    });
+
+    if (next) {
+      await tx.approval.updateMany({ where: { id: next.id, status: ApprovalStatus.WAITING }, data: { status: ApprovalStatus.PENDING } });
+    } else {
+      // Last level approved: the claim is approved and locked from here on
+      await tx.claim.update({ where: { id: claimId }, data: { status: ClaimStatus.APPROVED, approvedAt: decidedAt } });
+      const total = await getClaimTotal(claimId, tx);
+      await tx.claimHistory.create({
+        data: {
+          claimId,
+          action: "CLAIM_APPROVED",
+          performedById: user.id,
+          metadata: { total: total.toFixed(2), levels: approval.level, chainVersion: approval.chainVersion },
+        },
+      });
+    }
+
+    return {
+      id: approvalId,
+      level: approval.level,
+      status: ApprovalStatus.APPROVED,
+      decidedAt,
+      claim: next
+        ? { id: claimId, status: ClaimStatus.PENDING_APPROVAL, approvedAt: null }
+        : { id: claimId, status: ClaimStatus.APPROVED, approvedAt: decidedAt },
+    };
+  });
 }

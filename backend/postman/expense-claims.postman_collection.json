@@ -90,6 +90,10 @@
     {
       "key": "oneItemId",
       "value": ""
+    },
+    {
+      "key": "approvalId",
+      "value": ""
     }
   ],
   "item": [
@@ -1222,7 +1226,7 @@
                 }
               ]
             },
-            "description": "Uses the approver token from the login request. Lists only approvals that wait for THIS approver now (a level-2 step appears only after level 1 approved). Needs {{claimId}} submitted in folder 4."
+            "description": "Uses the approver token from the login request. Lists only approvals that wait for THIS approver now (a level-2 step appears only after level 1 approved). Needs {{claimId}} submitted in folder 4; saves {{approvalId}} (my step of that claim)."
           },
           "event": [
             {
@@ -1234,7 +1238,90 @@
                   "const body = pm.response.json();",
                   "pm.test(\"Has data and pagination\", function () { pm.expect(body.data).to.be.an(\"array\"); pm.expect(body.pagination).to.have.all.keys(\"page\",\"pageSize\",\"totalItems\",\"totalPages\"); });",
                   "pm.test(\"Every entry is a PENDING step of mine with a claim summary\", function () { body.data.forEach(function (a) { pm.expect(a.status).to.eql(\"PENDING\"); pm.expect(a.claim).to.have.all.keys(\"id\",\"claimNumber\",\"title\",\"total\",\"submittedAt\",\"claimantName\"); pm.expect(a.claim.total).to.be.a(\"string\"); }); });",
-                  "pm.test(\"The claim submitted earlier is waiting for me\", function () { const ids = body.data.map(function (a) { return a.claim.id; }); pm.expect(ids).to.include(pm.collectionVariables.get(\"claimId\")); });"
+                  "pm.test(\"The claim submitted earlier is waiting for me\", function () { const ids = body.data.map(function (a) { return a.claim.id; }); pm.expect(ids).to.include(pm.collectionVariables.get(\"claimId\")); });",
+                  "const mine = body.data.find(function (a) { return a.claim.id === pm.collectionVariables.get(\"claimId\"); }); if (mine) { pm.collectionVariables.set(\"approvalId\", mine.id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Approve my step of the claim",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/approvals/{{approvalId}}/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "approvals",
+                "{{approvalId}}",
+                "approve"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenApprover}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "One level claims (total under 10,000) are approved and locked right away. Claims over 10,000 move to the next level."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Step approved; claim moves on or is approved\", function () { const b = pm.response.json(); pm.expect(b.status).to.eql(\"APPROVED\"); pm.expect(b.decidedAt).to.be.a(\"string\"); pm.expect([\"PENDING_APPROVAL\",\"APPROVED\"]).to.include(b.claim.status); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Approve the same step again -> 409 APPROVAL_NOT_PENDING",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/approvals/{{approvalId}}/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "approvals",
+                "{{approvalId}}",
+                "approve"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenApprover}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "A decided step cannot be decided twice (double click and retry safe)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 409\", function () { pm.response.to.have.status(409); });",
+                  "pm.test(\"Error code is APPROVAL_NOT_PENDING\", function () { pm.expect(pm.response.json().error.code).to.eql(\"APPROVAL_NOT_PENDING\"); });"
                 ]
               }
             }
@@ -2014,6 +2101,118 @@
                       "key": "pageSize",
                       "value": "101"
                     }
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tokenApprover}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Status is 400\", function () { pm.response.to.have.status(400); });",
+                      "pm.test(\"Error code is VALIDATION_ERROR\", function () { pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Claimant approves a step -> 403",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/approvals/{{approvalId}}/approve",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "approvals",
+                    "{{approvalId}}",
+                    "approve"
+                  ]
+                },
+                "description": "Only approvers can approve (default token is the claimant's)."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Status is 403\", function () { pm.response.to.have.status(403); });",
+                      "pm.test(\"Error code is FORBIDDEN\", function () { pm.expect(pm.response.json().error.code).to.eql(\"FORBIDDEN\"); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Approve an unknown approval -> 404",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/approvals/00000000-0000-4000-8000-000000000000/approve",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "approvals",
+                    "00000000-0000-4000-8000-000000000000",
+                    "approve"
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tokenApprover}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "description": "An approval that does not exist, or belongs to another approver, looks the same: 404."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Status is 404\", function () { pm.response.to.have.status(404); });",
+                      "pm.test(\"Error code is NOT_FOUND\", function () { pm.expect(pm.response.json().error.code).to.eql(\"NOT_FOUND\"); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Approve with an id that is not a UUID -> 400",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/approvals/not-a-uuid/approve",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "approvals",
+                    "not-a-uuid",
+                    "approve"
                   ]
                 },
                 "auth": {
