@@ -132,6 +132,18 @@ registry.registerPath({
   },
 });
 
+// GET /claims/{id} also says why the claim was last rejected (kept after a resubmit; null if never rejected)
+const claimWithRejectionSchema = claimResponseSchema.extend({
+  lastRejection: z
+    .object({
+      reason: z.string().nullable(),
+      level: z.number().int(),
+      rejectedAt: z.string().nullable(),
+      rejectedBy: z.string(),
+    })
+    .nullable(),
+});
+
 // A claim in a list: no line items, just how many there are
 const claimSummarySchema = claimResponseSchema.omit({ lineItems: true }).extend({ lineItemCount: z.number().int() });
 
@@ -170,10 +182,12 @@ registry.registerPath({
   path: "/claims/{id}",
   tags: ["Claims"],
   summary: "Get one of your own claims (CLAIMANT only)",
+  description:
+    "lastRejection is set whenever the claim has ever been rejected (even after a resubmit), and null otherwise.",
   security: [{ [bearerAuth.name]: [] }],
   request: { params: claimIdParamsSchema },
   responses: {
-    200: { description: "The claim with its line items and computed total", content: { "application/json": { schema: claimResponseSchema } } },
+    200: { description: "The claim with its line items, computed total and last rejection", content: { "application/json": { schema: claimWithRejectionSchema } } },
     400: errorResponse("VALIDATION_ERROR (id is not a UUID)"),
     401: errorResponse("Missing, invalid or expired token"),
     403: errorResponse("Not a CLAIMANT"),
@@ -233,6 +247,26 @@ registry.registerPath({
     404: errorResponse("No such claim, or it belongs to someone else"),
     409: errorResponse("CLAIM_NOT_SUBMITTABLE (not a draft) or CLAIM_LOCKED (approved)"),
     422: errorResponse("NO_LINE_ITEMS (nothing to approve) or NO_APPROVER_AVAILABLE (no valid approver at a required level)"),
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/claims/{id}/resubmit",
+  tags: ["Claims"],
+  summary: "Send your REJECTED claim back to approval (starts a new approval chain)",
+  description:
+    "The claim returns to PENDING_APPROVAL and a new chain starts from level 1 with the same approvers. Earlier approvals, the rejection and the original submittedAt are kept; the resubmit is recorded in the claim history.",
+  security: [{ [bearerAuth.name]: [] }],
+  request: { params: claimIdParamsSchema },
+  responses: {
+    200: { description: "The claim, now PENDING_APPROVAL", content: { "application/json": { schema: claimResponseSchema } } },
+    400: errorResponse("VALIDATION_ERROR (id is not a UUID)"),
+    401: errorResponse("Missing, invalid or expired token"),
+    403: errorResponse("Not a CLAIMANT"),
+    404: errorResponse("No such claim, or it belongs to someone else"),
+    409: errorResponse("CLAIM_NOT_RESUBMITTABLE (not rejected) or CLAIM_LOCKED (approved)"),
+    422: errorResponse("NO_LINE_ITEMS (the claim has no items) or NO_APPROVER_AVAILABLE (no valid approver at a required level)"),
   },
 });
 
