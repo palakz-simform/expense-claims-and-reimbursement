@@ -10,7 +10,7 @@ Review `$ARGUMENTS` (or the endpoints changed in the current diff) against this 
 - Mounted below `app.use(authenticate)` (deny by default).
 - `requireRole(...)` for the roles that may call it.
 - Reads of a claim are scoped in the query (`claimScopeFor(user)` with `findFirst({ where: { id, ...scope } })`); out of scope returns 404, not 403.
-- Ownership/state checks live in the service (`NOT_YOUR_APPROVAL` 403, state-machine guards 409).
+- Ownership/state checks live in the service (someone else's object is 404, same as a missing one; state-machine guards 409).
 
 **Input**
 - Zod schema with `.strict()`; params, query and body all validated; no `req.body` spread into Prisma.

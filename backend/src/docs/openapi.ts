@@ -1,6 +1,7 @@
 import { OpenApiGeneratorV31, OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
 import { Role } from "../generated/prisma/enums";
+import { approvalIdParamsSchema, listApprovalsQuerySchema, rejectApprovalSchema } from "../modules/approvals/approvals.schemas";
 import { loginSchema } from "../modules/auth/auth.schemas";
 import {
   claimIdParamsSchema,
@@ -297,6 +298,126 @@ registry.registerPath({
     404: errorResponse("No such claim or line item, or the claim belongs to someone else"),
     409: errorResponse("CLAIM_LOCKED (approved)"),
     422: errorResponse("NO_LINE_ITEMS (it is the last item of a claim awaiting approval)"),
+  },
+});
+
+// --- Approvals ---
+// One approval is one approver's step in a claim's chain. The queue lists only the steps that wait for the caller now.
+const approvalQueueItemSchema = z.object({
+  id: z.string(),
+  level: z.number().int(),
+  status: z.literal("PENDING"),
+  claim: z.object({
+    id: z.string(),
+    claimNumber: z.number().int(),
+    title: z.string(),
+    total: z.string(),
+    submittedAt: z.string().nullable(),
+    claimantName: z.string(),
+  }),
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/approvals",
+  tags: ["Approvals"],
+  summary: "Your approval queue: the steps waiting for YOUR decision now, oldest submission first (APPROVER only)",
+  description:
+    "A level-2 step appears only after level 1 has approved. A step that was voided (the claim was edited or rejected) or already decided is not listed. You only ever see your own steps.",
+  security: [{ [bearerAuth.name]: [] }],
+  request: { query: listApprovalsQuerySchema },
+  responses: {
+    200: {
+      description: "One page of pending approvals, each with a summary of its claim, and the pagination info",
+      content: {
+        "application/json": {
+          schema: z.object({
+            data: z.array(approvalQueueItemSchema),
+            pagination: z.object({
+              page: z.number().int(),
+              pageSize: z.number().int(),
+              totalItems: z.number().int(),
+              totalPages: z.number().int(),
+            }),
+          }),
+        },
+      },
+    },
+    400: errorResponse("VALIDATION_ERROR (page below 1, pageSize above 100, unknown query field)"),
+    401: errorResponse("Missing, invalid or expired token"),
+    403: errorResponse("Not an APPROVER"),
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/approvals/{id}/approve",
+  tags: ["Approvals"],
+  summary: "Approve your step of a claim's approval chain (APPROVER only)",
+  description:
+    "If a higher level exists, its step becomes PENDING and the claim stays PENDING_APPROVAL. If this was the last level, the claim becomes APPROVED (and locked). Both are recorded in the claim history.",
+  security: [{ [bearerAuth.name]: [] }],
+  request: { params: approvalIdParamsSchema },
+  responses: {
+    200: {
+      description: "The decided step and the claim's status after it",
+      content: {
+        "application/json": {
+          schema: z.object({
+            id: z.string(),
+            level: z.number().int(),
+            status: z.literal("APPROVED"),
+            decidedAt: z.string(),
+            claim: z.object({
+              id: z.string(),
+              status: z.enum(["PENDING_APPROVAL", "APPROVED"]),
+              approvedAt: z.string().nullable(),
+            }),
+          }),
+        },
+      },
+    },
+    400: errorResponse("VALIDATION_ERROR (id is not a UUID)"),
+    401: errorResponse("Missing, invalid or expired token"),
+    403: errorResponse("Not an APPROVER"),
+    404: errorResponse("No such approval, or it belongs to another approver"),
+    409: errorResponse("APPROVAL_NOT_PENDING (already decided, not your turn yet, or voided because the claim changed)"),
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/approvals/{id}/reject",
+  tags: ["Approvals"],
+  summary: "Reject your step of a claim's approval chain, with a reason (APPROVER only)",
+  description:
+    "The claim becomes REJECTED and goes back to the claimant, who can edit it. Approvals already granted stay as they were; the open steps (waiting or pending) become INVALIDATED. The reason is stored on the step and in the claim history.",
+  security: [{ [bearerAuth.name]: [] }],
+  request: {
+    params: approvalIdParamsSchema,
+    body: { content: { "application/json": { schema: rejectApprovalSchema } } },
+  },
+  responses: {
+    200: {
+      description: "The decided step, the reason, and the claim's new status",
+      content: {
+        "application/json": {
+          schema: z.object({
+            id: z.string(),
+            level: z.number().int(),
+            status: z.literal("REJECTED"),
+            decidedAt: z.string(),
+            reason: z.string(),
+            claim: z.object({ id: z.string(), status: z.literal("REJECTED") }),
+          }),
+        },
+      },
+    },
+    400: errorResponse("VALIDATION_ERROR (id is not a UUID, reason missing or blank or over 500 characters, unknown field)"),
+    401: errorResponse("Missing, invalid or expired token"),
+    403: errorResponse("Not an APPROVER"),
+    404: errorResponse("No such approval, or it belongs to another approver"),
+    409: errorResponse("APPROVAL_NOT_PENDING (already decided, not your turn yet, or voided because the claim changed)"),
   },
 });
 

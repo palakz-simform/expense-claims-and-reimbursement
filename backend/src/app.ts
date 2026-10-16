@@ -7,6 +7,7 @@ import { globalLimiter } from "./middleware/rateLimit";
 import { authenticate } from "./middleware/authenticate";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import { requestLogger } from "./middleware/requestLogger";
+import { approvalsRouter } from "./modules/approvals/approvals.routes";
 import { authProtectedRouter, authPublicRouter } from "./modules/auth/auth.routes";
 import { claimsRouter } from "./modules/claims/claims.routes";
 
@@ -43,6 +44,7 @@ app.use(authenticate);
 // Protected routes
 app.use("/auth", authProtectedRouter); // GET /auth/me
 app.use("/claims", claimsRouter); // claims CRUD and line item edits (/claims, /claims/:id, /claims/:id/line-items/...)
+app.use("/approvals", approvalsRouter); // the approver's queue, approve and reject
 
 // 404 for unknown routes, then the central error handler (must be last)
 app.use(notFoundHandler);

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { paginationQuerySchema } from "../../lib/pagination";
 import { Prisma } from "../../generated/prisma/client";
 import { Category } from "../../generated/prisma/enums";
 
@@ -53,13 +54,8 @@ export const claimIdParamsSchema = z.object({ id: z.uuid() }).strict();
 // /claims/:id/line-items/:itemId
 export const lineItemParamsSchema = z.object({ id: z.uuid(), itemId: z.uuid() }).strict();
 
-// GET /claims: page number and page size (capped at 100). Query strings arrive as text, so coerce to numbers.
-export const listClaimsQuerySchema = z
-  .object({
-    page: z.coerce.number().int().min(1).default(1),
-    pageSize: z.coerce.number().int().min(1).max(100).default(20),
-  })
-  .strict();
+// GET /claims: page number and page size (the shared list pagination)
+export const listClaimsQuerySchema = paginationQuerySchema;
 
 export type CreateClaimInput = z.infer<typeof createClaimSchema>;
 export type ListClaimsQuery = z.infer<typeof listClaimsQuerySchema>;

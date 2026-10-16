@@ -152,9 +152,7 @@ export async function updateClaim(user: AuthUser, claimId: string, changes: Upda
   });
 }
 
-// Delete a claim. Only a DRAFT can go: it was never submitted, so it is scratch work.
-// Any submitted claim (pending, rejected or approved) has history and approvals that are part of the
-// audit trail finance may need, so it is never deleted.
+// Delete a claim. Only a DRAFT can go; a submitted claim is part of the audit trail and is never deleted.
 export async function deleteClaim(user: AuthUser, claimId: string) {
   await prisma.$transaction(async (tx) => {
     const { status } = await lockClaim(tx, user, claimId);
@@ -240,10 +238,8 @@ async function lockEditableClaim(tx: Prisma.TransactionClient, user: AuthUser, c
 // What an edit reports back, so the history row can say what changed
 type ClaimEditResult = { change: string; itemId?: string };
 
-// The ONE flow every edit of a claim goes through (title, add / change / remove a line item), in a
-// single transaction: lock and check the claim, apply the edit, record it, return the claim as the API shows it.
-// The edit itself is passed in, so rules that apply to every edit live here once, not in four places.
-// Concept: higher-order function (a shared flow with the varying step handed in).
+// The one flow every claim edit goes through: lock, apply the edit, record it, reset the chain if needed.
+// Concept: higher-order function (the edit itself is passed in).
 async function runClaimEdit(
   user: AuthUser,
   claimId: string,
@@ -278,9 +274,7 @@ async function runClaimEdit(
       },
     });
 
-    // A new total voids every decision made so far, so the chain starts again from level 1.
-    // A rejected claim has no live chain (resubmit builds one), and an unchanged total (a title or
-    // description edit) changes nothing the approvers decided on, so neither of those resets.
+    // A new total voids every decision so far, so the chain restarts (a rejected claim has no live chain)
     const isPending = locked.status === ClaimStatus.PENDING_APPROVAL;
     if (isPending && !oldTotal.equals(newTotal)) {
       await resetChain(tx, user, claimId, locked.currentApprovalVersion, oldTotal, newTotal);
