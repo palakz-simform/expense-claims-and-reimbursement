@@ -481,7 +481,7 @@
                 "{{claimId}}"
               ]
             },
-            "description": "Only the title can be edited (the total is derived, the status follows the workflow). Works on DRAFT and REJECTED claims.",
+            "description": "Only the title can be edited (the total is derived, the status follows the workflow). Works on any claim except an APPROVED one; a title change leaves the total unchanged, so an approval chain is not reset.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"title\": \"Postman test claim (renamed)\"\n}",
