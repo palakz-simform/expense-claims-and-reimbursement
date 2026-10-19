@@ -151,7 +151,10 @@ registry.registerPath({
   method: "get",
   path: "/claims",
   tags: ["Claims"],
-  summary: "List your own claims, newest first, one page at a time (CLAIMANT only)",
+  summary: "List the claims you may see, newest first, one page at a time",
+  description:
+    "Any role. A claimant sees their own claims, an approver sees claims where they have a pending, decided or voided step, finance sees all. " +
+    "Filters: status, and from/to (inclusive UTC days of submittedAt; drafts have no submittedAt, so a date filter excludes them).",
   security: [{ [bearerAuth.name]: [] }],
   request: { query: listClaimsQuerySchema },
   responses: {
@@ -171,9 +174,8 @@ registry.registerPath({
         },
       },
     },
-    400: errorResponse("VALIDATION_ERROR (page below 1, pageSize above 100, unknown query field)"),
+    400: errorResponse("VALIDATION_ERROR (page below 1, pageSize above 100, bad status or date, from later than to, unknown query field)"),
     401: errorResponse("Missing, invalid or expired token"),
-    403: errorResponse("Not a CLAIMANT"),
   },
 });
 
@@ -181,8 +183,9 @@ registry.registerPath({
   method: "get",
   path: "/claims/{id}",
   tags: ["Claims"],
-  summary: "Get one of your own claims (CLAIMANT only)",
+  summary: "Get one claim you may see",
   description:
+    "Any role, limited to the same scope as the list. " +
     "lastRejection is set whenever the claim has ever been rejected (even after a resubmit), and null otherwise.",
   security: [{ [bearerAuth.name]: [] }],
   request: { params: claimIdParamsSchema },
@@ -190,8 +193,7 @@ registry.registerPath({
     200: { description: "The claim with its line items, computed total and last rejection", content: { "application/json": { schema: claimWithRejectionSchema } } },
     400: errorResponse("VALIDATION_ERROR (id is not a UUID)"),
     401: errorResponse("Missing, invalid or expired token"),
-    403: errorResponse("Not a CLAIMANT"),
-    404: errorResponse("No such claim, or it belongs to someone else"),
+    404: errorResponse("No such claim, or it is outside your scope (the same answer, so existence is not revealed)"),
   },
 });
 

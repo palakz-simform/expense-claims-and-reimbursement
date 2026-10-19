@@ -36,9 +36,10 @@ Each user has one role. Approvers also have an `approvalLevel` (1 or 2).
 - **Rejection and resubmission:** a rejected claim goes back to the claimant with the reason (`lastRejection` on `GET /claims/:id`: reason, level, time and who rejected it). It stays editable but has no live chain, so edits never reset anything. `POST /claims/:id/resubmit` (only for a `REJECTED` claim, with at least one line item) starts a **new chain from level 1 with the same approvers** (one `chainVersion` higher) and moves the claim to `PENDING_APPROVAL`. Nothing is lost: the earlier approval rows, the rejection and its reason, the history and the original `submittedAt` all stay, and the resubmit is recorded as `CLAIM_RESUBMITTED`. `lastRejection` is kept after a resubmit and replaced if the claim is rejected again. Approvers come from the claimant's fixed assignments, so reassigning an approver between a rejection and the resubmit is out of scope for this POC.
 - **Approved claims are locked** in the service layer and by PostgreSQL triggers on line items and receipts.
 - **Audit trail:** every state change writes a `ClaimHistory` row in the same transaction.
-- **Visibility is enforced in queries.** An approver requesting a claim outside their queue gets `404`.
+- **Visibility is enforced in queries.** `claimScopeFor(user)` (one function in `lib/claimScope.ts`) returns the `where` for every claim read, so an out-of-scope claim is simply not found (`404`, never 403, so its existence is not revealed). A claimant sees their own claims; an approver sees claims where they have a `PENDING`, `APPROVED`, `REJECTED` or `INVALIDATED` step (a `WAITING` step stays hidden until their turn comes); finance sees all claims. Reads (`GET /claims`, `GET /claims/:id`) are open to all three roles within that scope; every write stays claimant-only. `GET /approvals` is the approver's to-do list (only steps they can decide now), while `GET /claims` is the read-only view of every claim they are involved in.
 - **Only drafts can be deleted.** A draft was never submitted, so `DELETE /claims/:id` removes it together with its line items and its own history. A submitted claim (pending, rejected or approved) is never deleted: its history and approvals are the audit trail finance may need in a dispute. Only the `title` of a claim can be edited (`PATCH /claims/:id`); the total is derived and the status follows the workflow.
-- **Lists are paginated, never loaded whole.** `GET /claims?page=1&pageSize=20` (`pageSize` at most 100) returns `{ data, pagination: { page, pageSize, totalItems, totalPages } }`, newest first; list items have the computed `total` and `lineItemCount` but no line items. Totals for a page come from one grouped query.
+- **Lists are paginated, never loaded whole.** `GET /claims?page=1&pageSize=20` (`pageSize` at most 100) accepts optional filters `status`, `from` and `to` (see below) and returns `{ data, pagination: { page, pageSize, totalItems, totalPages } }`, newest first; list items have the computed `total` and `lineItemCount` but no line items. Totals for a page come from one grouped query.
+- **List filters.** `status` is one of `DRAFT`, `PENDING_APPROVAL`, `REJECTED`, `APPROVED`. `from` and `to` (`YYYY-MM-DD`) filter on `submittedAt` and are inclusive UTC calendar days (`to` includes the whole day). A draft has no `submittedAt`, so any date filter leaves drafts out. `from` later than `to`, a bad date, a bad status or an unknown query field is `400`. Filters are combined with the role's scope using `AND`, so a filter can only narrow what a user may see.
 - **Dates are calendar dates compared in UTC.** A line item's `date` (`YYYY-MM-DD`) must be a real date and cannot be later than today's date in UTC (server time). A user far west of UTC may therefore be able to enter a date that is still "tomorrow" on their own clock; the rule never rejects a valid past expense.
 
 ## Logging and request IDs
@@ -55,7 +56,8 @@ Each user has one role. Approvers also have an `approvalLevel` (1 or 2).
 
 | Case | Response |
 |---|---|
-| Claim outside my visibility | 404 |
+| Claim outside my visibility (or missing) | 404 `NOT_FOUND` |
+| Invalid list filter (bad `status` or date, `from` after `to`, unknown query field) | 400 `VALIDATION_ERROR` |
 | Approve/reject an approval that is not mine (or does not exist) | 404 `NOT_FOUND` (not 403, so its existence is not revealed) |
 | Approval no longer pending | 409 `APPROVAL_NOT_PENDING` |
 | Editing an approved claim | 409 `CLAIM_LOCKED` (also raised by the database trigger as a backstop) |
