@@ -2,6 +2,7 @@ import { prisma } from "../../db/prisma";
 import { AppError } from "../../lib/AppError";
 import { logger } from "../../lib/logger";
 import { lockClaim, type LockedClaim } from "../../lib/claimLock";
+import { claimScopeFor } from "../../lib/claimScope";
 import { getClaimTotal, getClaimTotals } from "../../lib/claimTotal";
 import { Prisma } from "../../generated/prisma/client";
 import { ApprovalStatus, ClaimStatus } from "../../generated/prisma/enums";
@@ -95,8 +96,9 @@ export async function createClaim(user: AuthUser, input: CreateClaimInput) {
 export async function getClaim(user: AuthUser, id: string) {
   return prisma.$transaction(
     async (tx) => {
+      // The role's scope is part of the query: a claim outside it is not found (404)
       const claim = await tx.claim.findFirst({
-        where: { id, claimantId: user.id },
+        where: { id, ...claimScopeFor(user) },
         include: withLineItems,
       });
       if (!claim) {
