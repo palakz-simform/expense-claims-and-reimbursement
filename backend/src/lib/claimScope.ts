@@ -20,5 +20,10 @@ export function claimScopeFor(user: AuthUser): Prisma.ClaimWhereInput {
       return { approvals: { some: { approverId: user.id, status: { in: VISIBLE_APPROVAL_STATUSES } } } };
     case Role.FINANCE:
       return {};
+    default: {
+      // Fail closed: an unknown role must never fall through to "no filter" (which would show every claim)
+      const unknownRole: never = user.role;
+      throw new Error(`No claim scope for role ${String(unknownRole)}`);
+    }
   }
 }

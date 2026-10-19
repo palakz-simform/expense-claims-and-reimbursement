@@ -133,8 +133,12 @@ export async function getClaim(user: AuthUser, id: string) {
 export async function listClaims(user: AuthUser, query: ListClaimsQuery) {
   const { page, pageSize, status, from, to } = query;
 
-  // `to` is an inclusive day, so the range ends before the start of the next day (a draft has no submittedAt, so a date filter drops it)
-  const submittedAt = from || to ? { gte: from, lt: to && new Date(to.getTime() + MS_PER_DAY) } : undefined;
+  // `to` is an inclusive day, so the range ends before the next day starts
+  const dayAfterTo = to && new Date(to.getTime() + MS_PER_DAY);
+
+  // A date filter drops drafts, because a draft has no submittedAt
+  const hasDateFilter = Boolean(from || to);
+  const submittedAt = hasDateFilter ? { gte: from, lt: dayAfterTo } : undefined;
   const filters: Prisma.ClaimWhereInput = { status, submittedAt };
 
   // The scope and the filters are combined with AND, so a filter can never widen what the role may see
