@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { paginationQuerySchema } from "../../lib/pagination";
 import { Prisma } from "../../generated/prisma/client";
-import { Category } from "../../generated/prisma/enums";
+import { Category, ClaimStatus } from "../../generated/prisma/enums";
 
 // Most line items one claim can have (also enforced when adding a single item)
 export const MAX_LINE_ITEMS = 100;
@@ -54,8 +54,20 @@ export const claimIdParamsSchema = z.object({ id: z.uuid() }).strict();
 // /claims/:id/line-items/:itemId
 export const lineItemParamsSchema = z.object({ id: z.uuid(), itemId: z.uuid() }).strict();
 
-// GET /claims: page number and page size (the shared list pagination)
-export const listClaimsQuerySchema = paginationQuerySchema;
+// A calendar day (YYYY-MM-DD) as a UTC date
+const queryDateSchema = z.iso.date().transform((value) => new Date(`${value}T00:00:00.000Z`));
+
+// GET /claims: shared pagination plus optional filters. from/to are inclusive days of submittedAt (UTC).
+export const listClaimsQuerySchema = paginationQuerySchema
+  .extend({
+    status: z.enum(ClaimStatus).optional(),
+    from: queryDateSchema.optional(),
+    to: queryDateSchema.optional(),
+  })
+  .refine((query) => !query.from || !query.to || query.from <= query.to, {
+    message: "from cannot be later than to",
+    path: ["from"],
+  });
 
 export type CreateClaimInput = z.infer<typeof createClaimSchema>;
 export type ListClaimsQuery = z.infer<typeof listClaimsQuerySchema>;

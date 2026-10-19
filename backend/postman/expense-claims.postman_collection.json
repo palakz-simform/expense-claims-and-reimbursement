@@ -122,6 +122,22 @@
     {
       "key": "twoL2ApprovalId",
       "value": ""
+    },
+    {
+      "key": "approver3Email",
+      "value": "sana.l1@example.com"
+    },
+    {
+      "key": "financeEmail",
+      "value": "farah.finance@example.com"
+    },
+    {
+      "key": "tokenApprover3",
+      "value": ""
+    },
+    {
+      "key": "tokenFinance",
+      "value": ""
     }
   ],
   "item": [
@@ -2337,7 +2353,555 @@
       ]
     },
     {
-      "name": "6. Should fail (negative checks)",
+      "name": "6. Visibility and filters (run after the approvals folder)",
+      "item": [
+        {
+          "name": "Login as second approver (Sana)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Saves Sana's token in {{tokenApprover3}}. Sana is Bilal's level-1 approver, so she has no step on Asha's claims.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{approver3Email}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set(\"tokenApprover3\", body.token);",
+                  "pm.test(\"Response has a token and the approver\", function () { pm.expect(body.token).to.be.a(\"string\"); pm.expect(body.user.email).to.eql(pm.variables.get(\"approver3Email\")); pm.expect(body.user.role).to.eql(\"APPROVER\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login as finance (Farah)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Saves Farah's token in {{tokenFinance}}. Finance can read every claim.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{financeEmail}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set(\"tokenFinance\", body.token);",
+                  "pm.test(\"Response has a token and the finance\", function () { pm.expect(body.token).to.be.a(\"string\"); pm.expect(body.user.email).to.eql(pm.variables.get(\"financeEmail\")); pm.expect(body.user.role).to.eql(\"FINANCE\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Level-1 approver reads a claim on their chain -> 200",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{twoLevelClaimId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{twoLevelClaimId}}"
+              ]
+            },
+            "description": "Run after the approvals folder. Ravi approved level 1 of this claim.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenApprover}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"The claim with its items\", function () { const c = pm.response.json(); pm.expect(c.id).to.eql(pm.collectionVariables.get(\"twoLevelClaimId\")); pm.expect(c.lineItems).to.be.an(\"array\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Level-2 approver reads the same claim -> 200",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{twoLevelClaimId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{twoLevelClaimId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenApprover2}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Finance reads the same claim -> 200",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{twoLevelClaimId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{twoLevelClaimId}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenFinance}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Approver with no step on it reads it -> 404",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims/{{twoLevelClaimId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims",
+                "{{twoLevelClaimId}}"
+              ]
+            },
+            "description": "Approver-by-ID isolation: Sana is not on this claim's chain.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenApprover3}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 404\", function () { pm.response.to.have.status(404); });",
+                  "pm.test(\"NOT_FOUND, same answer as a missing claim\", function () { pm.expect(pm.response.json().error.code).to.eql(\"NOT_FOUND\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Approver lists claims: only ones they are on",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims?pageSize=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims"
+              ],
+              "query": [
+                {
+                  "key": "pageSize",
+                  "value": "100"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenApprover}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Lists the claim they approved\", function () { const ids = pm.response.json().data.map(c => c.id); pm.expect(ids).to.include(pm.collectionVariables.get(\"twoLevelClaimId\")); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Other approver lists claims: not this one",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims?pageSize=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims"
+              ],
+              "query": [
+                {
+                  "key": "pageSize",
+                  "value": "100"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenApprover3}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Does not list a claim they have no step on\", function () { const ids = pm.response.json().data.map(c => c.id); pm.expect(ids).to.not.include(pm.collectionVariables.get(\"twoLevelClaimId\")); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Finance lists claims: sees it",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims?status=APPROVED&pageSize=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "APPROVED"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "100"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenFinance}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Finance sees the claim\", function () { const ids = pm.response.json().data.map(c => c.id); pm.expect(ids).to.include(pm.collectionVariables.get(\"twoLevelClaimId\")); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filter by status=APPROVED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims?status=APPROVED&pageSize=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "APPROVED"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "100"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Every claim is APPROVED and the approved one is there\", function () { const data = pm.response.json().data; pm.expect(data.every(c => c.status === \"APPROVED\")).to.eql(true); pm.expect(data.map(c => c.id)).to.include(pm.collectionVariables.get(\"twoLevelClaimId\")); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filter by status=DRAFT leaves it out",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims?status=DRAFT&pageSize=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "DRAFT"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "100"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Only drafts, not the approved claim\", function () { const data = pm.response.json().data; pm.expect(data.every(c => c.status === \"DRAFT\")).to.eql(true); pm.expect(data.map(c => c.id)).to.not.include(pm.collectionVariables.get(\"twoLevelClaimId\")); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filter by submitted date range",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims?from=2000-01-01&to=2099-12-31&pageSize=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2000-01-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2099-12-31"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": "from and to are inclusive UTC days of submittedAt."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Submitted claims only (a draft has no submittedAt) and the approved one is there\", function () { const data = pm.response.json().data; pm.expect(data.every(c => c.submittedAt !== null)).to.eql(true); pm.expect(data.map(c => c.id)).to.include(pm.collectionVariables.get(\"twoLevelClaimId\")); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filter from a date in the future -> empty page",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/claims?from=2099-01-01",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "claims"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2099-01-01"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"No claims\", function () { const b = pm.response.json(); pm.expect(b.data).to.have.length(0); pm.expect(b.pagination.totalItems).to.eql(0); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "7. Should fail (negative checks)",
       "item": [
         {
           "name": "Auth and access",
@@ -3601,6 +4165,195 @@
                     "exec": [
                       "pm.test(\"Status is 403\", function () { pm.response.to.have.status(403); });",
                       "pm.test(\"Error code is FORBIDDEN\", function () { pm.expect(pm.response.json().error.code).to.eql(\"FORBIDDEN\"); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "List with a bad status -> 400",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/claims?status=NOPE",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "claims"
+                  ],
+                  "query": [
+                    {
+                      "key": "status",
+                      "value": "NOPE"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Status is 400\", function () { pm.response.to.have.status(400); });",
+                      "pm.test(\"VALIDATION_ERROR\", function () { pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "List with an impossible date -> 400",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/claims?from=2026-02-30",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "claims"
+                  ],
+                  "query": [
+                    {
+                      "key": "from",
+                      "value": "2026-02-30"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Status is 400\", function () { pm.response.to.have.status(400); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "List with from later than to -> 400",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/claims?from=2026-05-02&to=2026-05-01",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "claims"
+                  ],
+                  "query": [
+                    {
+                      "key": "from",
+                      "value": "2026-05-02"
+                    },
+                    {
+                      "key": "to",
+                      "value": "2026-05-01"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Status is 400\", function () { pm.response.to.have.status(400); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "List with an unknown query field -> 400",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/claims?foo=1",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "claims"
+                  ],
+                  "query": [
+                    {
+                      "key": "foo",
+                      "value": "1"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Status is 400\", function () { pm.response.to.have.status(400); });"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Finance creates a claim -> 403",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/claims",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "claims"
+                  ]
+                },
+                "description": "Needs 'Login as finance'. Finance is read-only.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"title\": \"x\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{tokenFinance}}",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test(\"Status is 403\", function () { pm.response.to.have.status(403); });"
                     ]
                   }
                 }

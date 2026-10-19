@@ -13,11 +13,21 @@ import {
   updateLineItemSchema,
 } from "./claims.schemas";
 
-// Claimant-only for now; other roles get read access in Phase 13. Order: role check, then validation.
+// Writes are claimant-only; reads are open to every role and limited by claimScopeFor. Order: role check, then validation.
 export const claimsRouter = Router();
 claimsRouter.post("/", requireRole(Role.CLAIMANT), validate({ body: createClaimSchema }), controller.create);
-claimsRouter.get("/", requireRole(Role.CLAIMANT), validate({ query: listClaimsQuerySchema }), controller.list);
-claimsRouter.get("/:id", requireRole(Role.CLAIMANT), validate({ params: claimIdParamsSchema }), controller.getOne);
+claimsRouter.get(
+  "/",
+  requireRole(Role.CLAIMANT, Role.APPROVER, Role.FINANCE),
+  validate({ query: listClaimsQuerySchema }),
+  controller.list,
+);
+claimsRouter.get(
+  "/:id",
+  requireRole(Role.CLAIMANT, Role.APPROVER, Role.FINANCE),
+  validate({ params: claimIdParamsSchema }),
+  controller.getOne,
+);
 
 claimsRouter.patch(
   "/:id",

@@ -2,6 +2,7 @@ import { prisma } from "../../db/prisma";
 import { AppError } from "../../lib/AppError";
 import { logger } from "../../lib/logger";
 import { lockClaim, type LockedClaim } from "../../lib/claimLock";
+import { claimScopeFor } from "../../lib/claimScope";
 import { getClaimTotal, getClaimTotals } from "../../lib/claimTotal";
 import { Prisma } from "../../generated/prisma/client";
 import { ApprovalStatus, ClaimStatus } from "../../generated/prisma/enums";
@@ -15,6 +16,8 @@ import type {
   UpdateClaimInput,
   UpdateLineItemInput,
 } from "./claims.schemas";
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 // Load a claim together with its line items, in a stable order
 const withLineItems = {
@@ -95,8 +98,9 @@ export async function createClaim(user: AuthUser, input: CreateClaimInput) {
 export async function getClaim(user: AuthUser, id: string) {
   return prisma.$transaction(
     async (tx) => {
+      // The role's scope is part of the query: a claim outside it is not found (404)
       const claim = await tx.claim.findFirst({
-        where: { id, claimantId: user.id },
+        where: { id, ...claimScopeFor(user) },
         include: withLineItems,
       });
       if (!claim) {
@@ -124,11 +128,21 @@ export async function getClaim(user: AuthUser, id: string) {
   );
 }
 
-// List the caller's own claims, newest first, one page at a time (never loads them all).
-// Concept: offset pagination (skip/take + count). The ownership filter is IN the query.
+// List the claims the caller may see, newest first, one page at a time (never loads them all).
+// Concept: offset pagination (skip/take + count). The role's scope is IN the query.
 export async function listClaims(user: AuthUser, query: ListClaimsQuery) {
-  const { page, pageSize } = query;
-  const where = { claimantId: user.id };
+  const { page, pageSize, status, from, to } = query;
+
+  // `to` is an inclusive day, so the range ends before the next day starts
+  const dayAfterTo = to && new Date(to.getTime() + MS_PER_DAY);
+
+  // A date filter drops drafts, because a draft has no submittedAt
+  const hasDateFilter = Boolean(from || to);
+  const submittedAt = hasDateFilter ? { gte: from, lt: dayAfterTo } : undefined;
+  const filters: Prisma.ClaimWhereInput = { status, submittedAt };
+
+  // The scope and the filters are combined with AND, so a filter can never widen what the role may see
+  const where: Prisma.ClaimWhereInput = { AND: [claimScopeFor(user), filters] };
 
   // id is a tie-breaker so claims created at the same instant never repeat or vanish between pages
   const [claims, totalItems] = await prisma.$transaction([
