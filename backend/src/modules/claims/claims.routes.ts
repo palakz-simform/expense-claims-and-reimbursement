@@ -16,7 +16,12 @@ import {
 // Writes are claimant-only; reads are open to every role and limited by claimScopeFor. Order: role check, then validation.
 export const claimsRouter = Router();
 claimsRouter.post("/", requireRole(Role.CLAIMANT), validate({ body: createClaimSchema }), controller.create);
-claimsRouter.get("/", requireRole(Role.CLAIMANT), validate({ query: listClaimsQuerySchema }), controller.list);
+claimsRouter.get(
+  "/",
+  requireRole(Role.CLAIMANT, Role.APPROVER, Role.FINANCE),
+  validate({ query: listClaimsQuerySchema }),
+  controller.list,
+);
 claimsRouter.get(
   "/:id",
   requireRole(Role.CLAIMANT, Role.APPROVER, Role.FINANCE),

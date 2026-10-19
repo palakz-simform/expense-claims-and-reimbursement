@@ -126,11 +126,11 @@ export async function getClaim(user: AuthUser, id: string) {
   );
 }
 
-// List the caller's own claims, newest first, one page at a time (never loads them all).
-// Concept: offset pagination (skip/take + count). The ownership filter is IN the query.
+// List the claims the caller may see, newest first, one page at a time (never loads them all).
+// Concept: offset pagination (skip/take + count). The role's scope is IN the query.
 export async function listClaims(user: AuthUser, query: ListClaimsQuery) {
   const { page, pageSize } = query;
-  const where = { claimantId: user.id };
+  const where = claimScopeFor(user);
 
   // id is a tie-breaker so claims created at the same instant never repeat or vanish between pages
   const [claims, totalItems] = await prisma.$transaction([
