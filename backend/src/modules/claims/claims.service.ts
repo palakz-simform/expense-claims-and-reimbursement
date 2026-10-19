@@ -17,6 +17,8 @@ import type {
   UpdateLineItemInput,
 } from "./claims.schemas";
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
 // Load a claim together with its line items, in a stable order
 const withLineItems = {
   lineItems: { orderBy: [{ date: "asc" }, { createdAt: "asc" }] },
@@ -129,8 +131,14 @@ export async function getClaim(user: AuthUser, id: string) {
 // List the claims the caller may see, newest first, one page at a time (never loads them all).
 // Concept: offset pagination (skip/take + count). The role's scope is IN the query.
 export async function listClaims(user: AuthUser, query: ListClaimsQuery) {
-  const { page, pageSize } = query;
-  const where = claimScopeFor(user);
+  const { page, pageSize, status, from, to } = query;
+
+  // `to` is an inclusive day, so the range ends before the start of the next day (a draft has no submittedAt, so a date filter drops it)
+  const submittedAt = from || to ? { gte: from, lt: to && new Date(to.getTime() + MS_PER_DAY) } : undefined;
+  const filters: Prisma.ClaimWhereInput = { status, submittedAt };
+
+  // The scope and the filters are combined with AND, so a filter can never widen what the role may see
+  const where: Prisma.ClaimWhereInput = { AND: [claimScopeFor(user), filters] };
 
   // id is a tie-breaker so claims created at the same instant never repeat or vanish between pages
   const [claims, totalItems] = await prisma.$transaction([
