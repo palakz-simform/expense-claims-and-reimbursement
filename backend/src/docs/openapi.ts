@@ -3,6 +3,7 @@ import { z } from "zod";
 import { Role } from "../generated/prisma/enums";
 import { approvalIdParamsSchema, listApprovalsQuerySchema, rejectApprovalSchema } from "../modules/approvals/approvals.schemas";
 import { loginSchema } from "../modules/auth/auth.schemas";
+import { MAX_RECEIPTS_PER_LINE_ITEM, lineItemIdParamsSchema, receiptIdParamsSchema } from "../modules/receipts/receipts.schemas";
 import {
   claimIdParamsSchema,
   createClaimSchema,
@@ -94,6 +95,17 @@ registry.registerPath({
   },
 });
 
+// --- Receipts ---
+// What the API says about a receipt. The stored file name and path are internal and never returned.
+const receiptResponseSchema = z.object({
+  id: z.string(),
+  lineItemId: z.string(),
+  originalName: z.string(),
+  mimeType: z.enum(["application/pdf", "image/png", "image/jpeg"]),
+  sizeBytes: z.number().int(),
+  uploadedAt: z.string(),
+});
+
 // --- Claims ---
 // Money is a string with 2 decimals (never a JSON number); the total is computed by the database, never accepted as input.
 const claimResponseSchema = z.object({
@@ -113,6 +125,7 @@ const claimResponseSchema = z.object({
       category: z.string(),
       amount: z.string(),
       description: z.string(),
+      receipts: z.array(receiptResponseSchema),
     }),
   ),
 });
@@ -454,6 +467,78 @@ registry.registerPath({
     403: errorResponse("Not an APPROVER"),
     404: errorResponse("No such approval, or it belongs to another approver"),
     409: errorResponse("APPROVAL_NOT_PENDING (already decided, not your turn yet, or voided because the claim changed)"),
+  },
+});
+
+// --- Receipts ---
+const binaryFile = z.string().meta({ format: "binary" });
+
+registry.registerPath({
+  method: "post",
+  path: "/line-items/{id}/receipts",
+  tags: ["Receipts"],
+  summary: "Upload a receipt for one of your own line items (CLAIMANT only)",
+  description:
+    `One file (PDF, PNG or JPEG, at most 5 MB) in the multipart field "file". The file's content is checked, not just its Content-Type. ` +
+    `A line item can have at most ${MAX_RECEIPTS_PER_LINE_ITEM} receipts. Allowed while the claim is DRAFT, PENDING_APPROVAL or REJECTED; ` +
+    `an approved claim is locked. Adding a receipt never resets the approval chain (the total does not change). ` +
+    `On a submitted claim it is recorded in the claim history (RECEIPT_ADDED).`,
+  security: [{ [bearerAuth.name]: [] }],
+  request: {
+    params: lineItemIdParamsSchema,
+    body: { content: { "multipart/form-data": { schema: z.object({ file: binaryFile }) } } },
+  },
+  responses: {
+    201: { description: "The stored receipt (no file name or path)", content: { "application/json": { schema: receiptResponseSchema } } },
+    400: errorResponse("VALIDATION_ERROR (id is not a UUID, no file, a wrong field name, more than one file)"),
+    401: errorResponse("Missing, invalid or expired token"),
+    403: errorResponse("Not a CLAIMANT"),
+    404: errorResponse("No such line item, or it belongs to someone else"),
+    409: errorResponse("CLAIM_LOCKED (the claim is approved)"),
+    413: errorResponse("FILE_TOO_LARGE (over 5 MB)"),
+    415: errorResponse("UNSUPPORTED_FILE_TYPE (not a PDF, PNG or JPEG, or the content does not match the type)"),
+    422: errorResponse("RECEIPT_LIMIT_REACHED (the line item already has the maximum)"),
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/receipts/{id}",
+  tags: ["Receipts"],
+  summary: "Download a receipt you may see",
+  description:
+    "Any role, within the same claim scope as GET /claims/{id}. Sent as an attachment with private caching. " +
+    "A receipt of a claim outside your scope is a 404, the same as one that does not exist.",
+  security: [{ [bearerAuth.name]: [] }],
+  request: { params: receiptIdParamsSchema },
+  responses: {
+    200: {
+      description: "The file, with the Content-Type it was uploaded as",
+      content: { "application/pdf": { schema: binaryFile }, "image/png": { schema: binaryFile }, "image/jpeg": { schema: binaryFile } },
+    },
+    400: errorResponse("VALIDATION_ERROR (id is not a UUID)"),
+    401: errorResponse("Missing, invalid or expired token"),
+    404: errorResponse("No such receipt, outside your scope, or its file is missing on the server"),
+  },
+});
+
+registry.registerPath({
+  method: "delete",
+  path: "/receipts/{id}",
+  tags: ["Receipts"],
+  summary: "Delete one of your own receipts (CLAIMANT only)",
+  description:
+    "Same rules as uploading: the claim must not be approved. The row is removed first and the file after the commit. " +
+    "On a submitted claim it is recorded in the claim history (RECEIPT_REMOVED).",
+  security: [{ [bearerAuth.name]: [] }],
+  request: { params: receiptIdParamsSchema },
+  responses: {
+    204: { description: "Deleted" },
+    400: errorResponse("VALIDATION_ERROR (id is not a UUID)"),
+    401: errorResponse("Missing, invalid or expired token"),
+    403: errorResponse("Not a CLAIMANT"),
+    404: errorResponse("No such receipt, or it belongs to someone else"),
+    409: errorResponse("CLAIM_LOCKED (the claim is approved)"),
   },
 });
 
