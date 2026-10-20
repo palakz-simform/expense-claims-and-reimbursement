@@ -8,7 +8,7 @@ import type { AuthUser } from "../../types/express";
 import { MAX_RECEIPTS_PER_LINE_ITEM } from "./receipts.schemas";
 
 // API shape of a receipt: never the stored file name or path, which are internal
-const receiptSelect = {
+export const receiptSelect = {
   id: true,
   lineItemId: true,
   originalName: true,

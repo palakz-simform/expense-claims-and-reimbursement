@@ -8,6 +8,7 @@ import { Prisma } from "../../generated/prisma/client";
 import { ApprovalStatus, ClaimStatus } from "../../generated/prisma/enums";
 import type { AuthUser } from "../../types/express";
 import { buildChain, resetChain } from "../approvals/approvals.service";
+import { receiptSelect } from "../receipts/receipts.service";
 import { MAX_LINE_ITEMS } from "./claims.schemas";
 import type {
   CreateClaimInput,
@@ -19,9 +20,12 @@ import type {
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-// Load a claim together with its line items, in a stable order
+// Load a claim together with its line items (and each item's receipts), in a stable order
 const withLineItems = {
-  lineItems: { orderBy: [{ date: "asc" }, { createdAt: "asc" }] },
+  lineItems: {
+    orderBy: [{ date: "asc" }, { createdAt: "asc" }],
+    include: { receipts: { select: receiptSelect, orderBy: [{ uploadedAt: "asc" }, { id: "asc" }] } },
+  },
 } satisfies Prisma.ClaimInclude;
 
 // For lists: only the number of line items, not the items themselves
@@ -50,6 +54,7 @@ function toClaimResponse(claim: ClaimWithItems, total: Prisma.Decimal) {
       category: item.category,
       amount: item.amount.toFixed(2),
       description: item.description,
+      receipts: item.receipts,
     })),
   };
 }
