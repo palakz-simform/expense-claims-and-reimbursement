@@ -42,3 +42,11 @@ export async function download(req: Request, res: Response, next: NextFunction) 
     }
   });
 }
+
+// DELETE /receipts/:id: 204, nothing to return
+export async function remove(req: Request, res: Response) {
+  const user = req.user!;
+  const receiptId = req.params.id as string;
+  await receiptsService.deleteReceipt(user, receiptId);
+  res.status(204).send();
+}

@@ -93,8 +93,56 @@ export async function getReceiptFile(user: AuthUser, receiptId: string) {
     throw new AppError(404, "NOT_FOUND", "Receipt not found");
   }
 
-  // basename keeps the path inside UPLOAD_DIR even if a stored name were ever tampered with
-  const filePath = path.join(env.UPLOAD_DIR, path.basename(receipt.storedName));
+  const filePath = storedFilePath(receipt.storedName);
 
   return { filePath, originalName: receipt.originalName, mimeType: receipt.mimeType };
+}
+
+// Where a stored receipt lives. basename keeps the path inside UPLOAD_DIR even if a stored name were ever tampered with.
+function storedFilePath(storedName: string): string {
+  return path.join(env.UPLOAD_DIR, path.basename(storedName));
+}
+
+// Remove a receipt: the row, the history, then (after the commit) the file.
+// Same rules as adding one: only the owner, and not on an approved claim.
+export async function deleteReceipt(user: AuthUser, receiptId: string): Promise<void> {
+  const storedName = await prisma.$transaction(async (tx) => {
+    // Which claim the receipt is under; the claim lock below proves it is the caller's own (else 404)
+    const receipt = await tx.receipt.findUnique({
+      where: { id: receiptId },
+      select: { storedName: true, originalName: true, lineItemId: true, lineItem: { select: { claimId: true } } },
+    });
+    if (!receipt) {
+      throw new AppError(404, "NOT_FOUND", "Receipt not found");
+    }
+    const claimId = receipt.lineItem.claimId;
+
+    const locked = await lockEditableClaim(tx, user, claimId);
+
+    // Conditional delete: if a concurrent request already removed it, count is 0 and this one is a 404
+    const deleted = await tx.receipt.deleteMany({ where: { id: receiptId } });
+    if (deleted.count === 0) {
+      throw new AppError(404, "NOT_FOUND", "Receipt not found");
+    }
+    await tx.claim.update({ where: { id: claimId }, data: { updatedAt: new Date() } });
+
+    // Audit trail for a claim that was already submitted (a draft has no history yet)
+    if (locked.status !== ClaimStatus.DRAFT) {
+      await tx.claimHistory.create({
+        data: {
+          claimId,
+          action: "RECEIPT_REMOVED",
+          performedById: user.id,
+          metadata: { itemId: receipt.lineItemId, receiptId, originalName: receipt.originalName },
+        },
+      });
+    }
+
+    return receipt.storedName;
+  });
+
+  // Only after the commit: if the delete had failed, the file must still be there. A failure here leaves an orphan file, so it is logged.
+  await removeStoredFile(storedFilePath(storedName)).catch((error) => {
+    logger.error({ err: error, receiptId }, "Receipt row deleted but its file could not be removed");
+  });
 }

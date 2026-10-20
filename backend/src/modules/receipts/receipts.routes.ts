@@ -24,3 +24,6 @@ receiptsRouter.get(
   validate({ params: receiptIdParamsSchema }),
   controller.download,
 );
+
+// Removing follows the same rule as adding: claimant only, and the claim must not be approved
+receiptsRouter.delete("/receipts/:id", requireRole(Role.CLAIMANT), validate({ params: receiptIdParamsSchema }), controller.remove);
