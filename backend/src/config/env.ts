@@ -2,8 +2,10 @@ import path from "node:path";
 import { config as loadEnvFile } from "dotenv";
 import { z } from "zod";
 
-// NODE_ENV=test reads .env.test (the Neon `test` branch), so tests and scripts can never touch the dev data
-loadEnvFile({ path: process.env.NODE_ENV === "test" ? ".env.test" : ".env" });
+// NODE_ENV=test reads .env.test (the Neon `test` branch). In test mode the file overrides variables already set
+// in the shell, so a leftover dev DATABASE_URL_POOLED can never point the tests at the dev data.
+const isTest = process.env.NODE_ENV === "test";
+loadEnvFile({ path: isTest ? ".env.test" : ".env", override: isTest });
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
