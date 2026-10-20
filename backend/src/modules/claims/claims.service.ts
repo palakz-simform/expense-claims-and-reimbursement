@@ -8,7 +8,7 @@ import { Prisma } from "../../generated/prisma/client";
 import { ApprovalStatus, ClaimStatus } from "../../generated/prisma/enums";
 import type { AuthUser } from "../../types/express";
 import { buildChain, resetChain } from "../approvals/approvals.service";
-import { receiptSelect } from "../receipts/receipts.service";
+import { receiptSelect, removeReceiptFiles, removeReceiptRows } from "../receipts/receipts.service";
 import { MAX_LINE_ITEMS } from "./claims.schemas";
 import type {
   CreateClaimInput,
@@ -186,7 +186,7 @@ export async function updateClaim(user: AuthUser, claimId: string, changes: Upda
 
 // Delete a claim. Only a DRAFT can go; a submitted claim is part of the audit trail and is never deleted.
 export async function deleteClaim(user: AuthUser, claimId: string) {
-  await prisma.$transaction(async (tx) => {
+  const removedFiles = await prisma.$transaction(async (tx) => {
     const { status } = await lockClaim(tx, user, claimId);
 
     if (status === ClaimStatus.APPROVED) {
@@ -196,10 +196,18 @@ export async function deleteClaim(user: AuthUser, claimId: string) {
       throw new AppError(409, "CLAIM_NOT_DELETABLE", "Only a draft claim can be deleted; a submitted claim is part of the audit trail");
     }
 
-    // The history rows point at the claim (Restrict), so they go first; the line items are removed with the claim
+    // The receipts point at the line items (Restrict), so they go first
+    const storedNames = await removeReceiptRows(tx, user, claimId, status, { lineItem: { claimId } });
+
+    // The history rows point at the claim (Restrict), so they go next; the line items are removed with the claim
     await tx.claimHistory.deleteMany({ where: { claimId } });
     await tx.claim.delete({ where: { id: claimId } });
+
+    return storedNames;
   });
+
+  // Only after the commit, so a failed delete never loses a file
+  await removeReceiptFiles(removedFiles);
 
   // A deleted draft leaves no history row, so record it in the application log
   logger.info({ claimId, userId: user.id }, "Draft claim deleted");
@@ -409,7 +417,10 @@ export async function updateLineItem(user: AuthUser, claimId: string, itemId: st
 
 // Remove ONE line item from a claim
 export async function deleteLineItem(user: AuthUser, claimId: string, itemId: string) {
-  return runClaimEdit(user, claimId, async (tx, locked) => {
+  // Files of the item's receipts, removed from disk only after the transaction committed
+  const removedFiles: string[] = [];
+
+  const claim = await runClaimEdit(user, claimId, async (tx, locked) => {
     await findLineItem(tx, claimId, itemId);
 
     // A claim awaiting approval must keep at least one item (drafts and rejected claims may be emptied)
@@ -420,9 +431,16 @@ export async function deleteLineItem(user: AuthUser, claimId: string, itemId: st
       }
     }
 
+    // The receipt foreign key is Restrict, so the item's receipts go first
+    const storedNames = await removeReceiptRows(tx, user, claimId, locked.status, { lineItemId: itemId });
+    removedFiles.push(...storedNames);
+
     await tx.lineItem.delete({ where: { id: itemId } });
     await touchClaim(tx, claimId);
 
     return { change: "line item removed", itemId };
   });
+
+  await removeReceiptFiles(removedFiles);
+  return claim;
 }

@@ -6,6 +6,7 @@ import { lockEditableClaim } from "../../lib/claimLock";
 import { claimScopeFor } from "../../lib/claimScope";
 import { logger } from "../../lib/logger";
 import { removeStoredFile, verifyReceiptFile } from "../../lib/receiptFiles";
+import type { Prisma } from "../../generated/prisma/client";
 import { ClaimStatus } from "../../generated/prisma/enums";
 import type { AuthUser } from "../../types/express";
 import { MAX_RECEIPTS_PER_LINE_ITEM } from "./receipts.schemas";
@@ -145,4 +146,49 @@ export async function deleteReceipt(user: AuthUser, receiptId: string): Promise<
   await removeStoredFile(storedFilePath(storedName)).catch((error) => {
     logger.error({ err: error, receiptId }, "Receipt row deleted but its file could not be removed");
   });
+}
+
+// Used when a line item or a draft claim is deleted: removes the receipt rows it owns, inside the caller's transaction.
+// The receipt foreign key is Restrict, so these rows must go first. Returns the stored names so the files can be removed after the commit.
+export async function removeReceiptRows(
+  tx: Prisma.TransactionClient,
+  user: AuthUser,
+  claimId: string,
+  claimStatus: ClaimStatus,
+  where: Prisma.ReceiptWhereInput,
+): Promise<string[]> {
+  const receipts = await tx.receipt.findMany({
+    where,
+    select: { id: true, lineItemId: true, originalName: true, storedName: true },
+  });
+  if (receipts.length === 0) {
+    return [];
+  }
+
+  await tx.receipt.deleteMany({ where: { id: { in: receipts.map((receipt) => receipt.id) } } });
+
+  // A draft has no history yet; a submitted claim records each removed receipt
+  if (claimStatus !== ClaimStatus.DRAFT) {
+    await tx.claimHistory.createMany({
+      data: receipts.map((receipt) => ({
+        claimId,
+        action: "RECEIPT_REMOVED" as const,
+        performedById: user.id,
+        metadata: { itemId: receipt.lineItemId, receiptId: receipt.id, originalName: receipt.originalName },
+      })),
+    });
+  }
+
+  return receipts.map((receipt) => receipt.storedName);
+}
+
+// Delete the files of receipts whose rows are already gone. Call it only AFTER the transaction committed.
+export async function removeReceiptFiles(storedNames: string[]): Promise<void> {
+  await Promise.all(
+    storedNames.map((storedName) =>
+      removeStoredFile(storedFilePath(storedName)).catch((error) => {
+        logger.error({ err: error, storedName }, "Receipt row deleted but its file could not be removed");
+      }),
+    ),
+  );
 }
