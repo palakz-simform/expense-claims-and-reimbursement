@@ -1,6 +1,9 @@
+import path from "node:path";
+import { env } from "../../config/env";
 import { prisma } from "../../db/prisma";
 import { AppError } from "../../lib/AppError";
 import { lockEditableClaim } from "../../lib/claimLock";
+import { claimScopeFor } from "../../lib/claimScope";
 import { logger } from "../../lib/logger";
 import { removeStoredFile, verifyReceiptFile } from "../../lib/receiptFiles";
 import { ClaimStatus } from "../../generated/prisma/enums";
@@ -77,4 +80,21 @@ export async function addReceipt(user: AuthUser, lineItemId: string, file: Expre
     });
     throw error;
   }
+}
+
+// Finds a receipt the caller may see and where its file is. The claim scope is IN the query, so a receipt
+// of a claim outside the caller's scope is simply not found (404), exactly like one that does not exist.
+export async function getReceiptFile(user: AuthUser, receiptId: string) {
+  const receipt = await prisma.receipt.findFirst({
+    where: { id: receiptId, lineItem: { claim: claimScopeFor(user) } },
+    select: { originalName: true, storedName: true, mimeType: true },
+  });
+  if (!receipt) {
+    throw new AppError(404, "NOT_FOUND", "Receipt not found");
+  }
+
+  // basename keeps the path inside UPLOAD_DIR even if a stored name were ever tampered with
+  const filePath = path.join(env.UPLOAD_DIR, path.basename(receipt.storedName));
+
+  return { filePath, originalName: receipt.originalName, mimeType: receipt.mimeType };
 }

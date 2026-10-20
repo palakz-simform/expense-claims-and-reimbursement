@@ -18,6 +18,7 @@ const storage = multer.diskStorage({
 // First gate: only the allowed Content-Types are saved at all (the content itself is checked after saving)
 const multerUpload = multer({
   storage,
+  defParamCharset: "utf8", // browsers send file names as UTF-8; multer's default (latin1) garbles "é" into "Ã©"
   limits: { fileSize: MAX_RECEIPT_BYTES, files: 1, fields: 0 },
   fileFilter: (_req, file, callback) => {
     if (!(file.mimetype in RECEIPT_EXTENSIONS)) {
