@@ -21,7 +21,8 @@ const multerUpload = multer({
   defParamCharset: "utf8", // browsers send file names as UTF-8; multer's default (latin1) garbles "é" into "Ã©"
   limits: { fileSize: MAX_RECEIPT_BYTES, files: 1, fields: 0 },
   fileFilter: (_req, file, callback) => {
-    if (!(file.mimetype in RECEIPT_EXTENSIONS)) {
+    // hasOwn, not `in`: `in` also matches inherited names such as "toString" or "constructor"
+    if (!Object.hasOwn(RECEIPT_EXTENSIONS, file.mimetype)) {
       callback(new AppError(415, "UNSUPPORTED_FILE_TYPE", "Only PDF, PNG and JPEG receipts are accepted"));
       return;
     }
