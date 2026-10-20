@@ -1,5 +1,9 @@
-import "dotenv/config";
+import path from "node:path";
+import { config as loadEnvFile } from "dotenv";
 import { z } from "zod";
+
+// NODE_ENV=test reads .env.test (the Neon `test` branch), so tests and scripts can never touch the dev data
+loadEnvFile({ path: process.env.NODE_ENV === "test" ? ".env.test" : ".env" });
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -14,6 +18,12 @@ const envSchema = z.object({
   // Password given to every seeded user. Only the seed script needs it, so it is optional here
   // (the app must still boot in production, where it is not set).
   SEED_PASSWORD: z.string().min(8, "SEED_PASSWORD must be at least 8 characters").optional(),
+  // Folder for uploaded receipts (a Docker volume in containers). Resolved to an absolute path.
+  UPLOAD_DIR: z
+    .string()
+    .min(1)
+    .default("uploads")
+    .transform((dir) => path.resolve(dir)),
 });
 
 const parsed = envSchema.safeParse(process.env);
