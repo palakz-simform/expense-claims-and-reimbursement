@@ -19,9 +19,9 @@ The focus is backend correctness: data integrity, authorization, approval workfl
 
 | Role | Can do |
 |---|---|
-| CLAIMANT | Create, edit, submit and resubmit own claims; view own claims |
-| APPROVER | View claims in their queue and ones they decided; approve or reject with a reason |
-| FINANCE | View all claims (read-only); export approved claims for a period |
+| CLAIMANT | Create, edit, submit and resubmit own claims; upload and delete receipts; view own claims |
+| APPROVER | View claims they have a step on and download their receipts; approve or reject with a reason |
+| FINANCE | View all claims and download receipts (read-only); export approved claims for a period |
 
 Each user has one role. Approvers also have an `approvalLevel` (1 or 2).
 
@@ -29,6 +29,7 @@ Each user has one role. Approvers also have an `approvalLevel` (1 or 2).
 
 - **Claim total is derived.** There is no stored total; it is `SUM(lineItem.amount)`, so it cannot drift from the line items. Amounts use `Decimal(12,2)`. In the API, money (`amount`, `total`) is a **string with 2 decimals** (for example `"125.50"`), never a JSON number, and clients cannot send a `total` (unknown fields are rejected with 400).
 - **Receipts are attached per line item, not per claim** (the brief allows either; this is our documented choice). A line item can have zero or more receipts; a receipt is optional and is not required to submit. Why per line item: each receipt proves one specific expense, so approvers and finance can trace an amount to its evidence, and the approved-claim lock triggers apply at the same level as the amounts they protect.
+- **Receipt rules.** `POST /line-items/:id/receipts` takes one file (PDF, PNG or JPEG, at most 5 MB) in the multipart field `file`; a line item holds at most 5 receipts (`422 RECEIPT_LIMIT_REACHED`). The client's Content-Type is not trusted: the file's first bytes are checked too (`415 UNSUPPORTED_FILE_TYPE`), and a file over the limit is `413 FILE_TOO_LARGE`. The file is saved under a random name inside `UPLOAD_DIR` (never the client's file name, so no path traversal) and the API never returns the stored name or path; the original name is kept only to show and to name the download. Receipts can be added or deleted while the claim is a draft, awaiting approval or rejected (approved is `409 CLAIM_LOCKED`, with a database trigger as backstop), by the claimant who owns the item, with the claim row locked so the 5-receipt cap holds under concurrent uploads. A receipt does not change the total, so it never resets the approval chain, and approvals already given stay valid. On a submitted claim every add and remove is recorded in `ClaimHistory` (`RECEIPT_ADDED`, `RECEIPT_REMOVED`); a draft has no history. `GET /receipts/:id` streams the file to the claimant, approvers and finance within the same claim scope as `GET /claims/:id` (out of scope is `404`), as a private attachment. Deleting a line item or a draft deletes its receipts: the rows go in the same transaction and the files are removed only after it commits, so a failed delete never loses a file. A receipt whose file is missing on disk downloads as `404`. Receipts are listed on each line item of a claim response (`receipts`).
 - **Status flow:** `DRAFT -> PENDING_APPROVAL -> APPROVED`, or `PENDING_APPROVAL -> REJECTED -> (edit, resubmit) -> PENDING_APPROVAL`. `APPROVED` is terminal and read-only.
 - **Approval routing (N levels):** the number of required levels comes from an ordered list of amount tiers in `lib/approvalPolicy.ts` (currently: from ₹0 level 1; from ₹10,000 levels 1 and 2). Each claimant has a fixed approver per level in `ApproverAssignment` (one row per claimant and level, set up by the seed because there is no admin UI). On submit, the chain is built by looping over `1..requiredLevels` and copying the claimant's assigned approver for each level onto an `Approval` row, so assignment changes later never affect claims already in flight. Adding a level 3 means one new tier in the policy plus assignment rows, with no schema change. If a claimant has no approver at a required level, submit fails with `422 NO_APPROVER_AVAILABLE`.
 - **Amount change during approval:** a claim awaiting approval can still be edited (line items or title). If an edit changes the **total**, every decision so far is void: the live approval rows (waiting, pending and already approved) become `INVALIDATED`, `chainVersion` goes up by one, and a new chain is built from level 1 for the new total. The approvers stay the same, because they come from the claimant's fixed assignments, so if Alice approved and Bob was pending, both are reset and Alice is asked again. The number of levels can change if the total crosses a tier (for example ₹9,000 to ₹12,000 adds level 2). An edit that leaves the total unchanged (a description, date, category or title change) does not reset anything, and neither does an edit to a draft or a rejected claim (a rejected claim has no live chain; resubmit builds a new one). Old approval rows are kept for audit, and every edit to a submitted claim is recorded in `ClaimHistory` (`CLAIM_UPDATED`, plus `APPROVAL_CHAIN_RESET` when the chain is rebuilt). A claim awaiting approval must keep at least one line item (`422 NO_LINE_ITEMS`); a draft or rejected claim may be emptied but cannot be submitted again until it has an item. An approved claim cannot be edited at all.
@@ -67,6 +68,10 @@ Each user has one role. Approvers also have an `approvalLevel` (1 or 2).
 | Resubmitting a claim that is not rejected | 409 `CLAIM_NOT_RESUBMITTABLE` (an approved one is 409 `CLAIM_LOCKED`) |
 | A value that must be unique already exists | 409 `CONFLICT` |
 | Submitting or resubmitting with no line items, or removing the last line item of a claim awaiting approval | 422 `NO_LINE_ITEMS` |
+| Uploading a 6th receipt to a line item | 422 `RECEIPT_LIMIT_REACHED` |
+| Receipt over 5 MB | 413 `FILE_TOO_LARGE` |
+| Receipt that is not a PDF, PNG or JPEG (by Content-Type or by content) | 415 `UNSUPPORTED_FILE_TYPE` |
+| Receipt upload with no file, a wrong field name or several files | 400 `VALIDATION_ERROR` |
 | Claimant has no approver at a required level | 422 `NO_APPROVER_AVAILABLE` |
 
 ## Project layout
@@ -81,7 +86,7 @@ STEPS.md    Build plan
 
 ## Setup (to be completed)
 
-1. Copy `.env.example` to `.env` and fill in the values (Neon `DATABASE_URL` and `DIRECT_URL`, `JWT_SECRET`, etc.).
+1. Copy `.env.example` to `.env` and fill in the values (Neon `DATABASE_URL` and `DIRECT_URL`, `JWT_SECRET`, etc.). `UPLOAD_DIR` (default `uploads`) is where receipt files are stored; in Docker it will be a named volume so files survive restarts. Scripts and tests run with `NODE_ENV=test` read `.env.test` instead (the Neon `test` branch).
 2. `docker compose up`
 
 Seeded logins, how to run tests, the finance export date definition and the full API reference will be added later.
