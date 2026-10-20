@@ -1,7 +1,7 @@
 import { prisma } from "../../db/prisma";
 import { AppError } from "../../lib/AppError";
 import { logger } from "../../lib/logger";
-import { lockClaim, type LockedClaim } from "../../lib/claimLock";
+import { lockClaim, lockEditableClaim, type LockedClaim } from "../../lib/claimLock";
 import { claimScopeFor } from "../../lib/claimScope";
 import { getClaimTotal, getClaimTotals } from "../../lib/claimTotal";
 import { Prisma } from "../../generated/prisma/client";
@@ -283,18 +283,6 @@ export async function resubmitClaim(user: AuthUser, claimId: string) {
 // ---------------------------------------------------------------------------
 // Editing line items
 // ---------------------------------------------------------------------------
-
-// Locks the claim and checks its content can be edited (line items, title).
-// Only an APPROVED claim is closed for good. A DRAFT, a REJECTED claim and a claim awaiting approval can all be edited.
-async function lockEditableClaim(tx: Prisma.TransactionClient, user: AuthUser, claimId: string) {
-  const locked = await lockClaim(tx, user, claimId);
-
-  if (locked.status === ClaimStatus.APPROVED) {
-    throw new AppError(409, "CLAIM_LOCKED", "This claim is approved and can no longer be changed");
-  }
-
-  return locked;
-}
 
 // What an edit reports back, so the history row can say what changed
 type ClaimEditResult = { change: string; itemId?: string };

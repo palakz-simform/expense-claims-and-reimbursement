@@ -1,6 +1,6 @@
 import { AppError } from "./AppError";
 import { Prisma } from "../generated/prisma/client";
-import type { ClaimStatus } from "../generated/prisma/enums";
+import { ClaimStatus } from "../generated/prisma/enums";
 import type { AuthUser } from "../types/express";
 
 // What a caller learns about a claim it has locked
@@ -32,4 +32,16 @@ export async function lockClaim(tx: Prisma.TransactionClient, user: AuthUser, cl
 // (e.g. by loading its own approval) and pass the claim id from that approval, never from the request.
 export async function lockClaimById(tx: Prisma.TransactionClient, claimId: string): Promise<LockedClaim> {
   return lockClaimRow(tx, Prisma.sql`"id" = ${claimId}::uuid`);
+}
+
+// Locks the claim and checks its content can be edited (line items, title, receipts).
+// Only an APPROVED claim is closed for good. A DRAFT, a REJECTED claim and a claim awaiting approval can all be edited.
+export async function lockEditableClaim(tx: Prisma.TransactionClient, user: AuthUser, claimId: string): Promise<LockedClaim> {
+  const locked = await lockClaim(tx, user, claimId);
+
+  if (locked.status === ClaimStatus.APPROVED) {
+    throw new AppError(409, "CLAIM_LOCKED", "This claim is approved and can no longer be changed");
+  }
+
+  return locked;
 }
