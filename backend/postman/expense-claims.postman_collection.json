@@ -3458,6 +3458,57 @@
           ]
         },
         {
+          "name": "Finance HEAD on the export -> 200, headers only",
+          "request": {
+            "method": "HEAD",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/finance/export?from=2000-01-01&to={{today}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "finance",
+                "export"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2000-01-01"
+                },
+                {
+                  "key": "to",
+                  "value": "{{today}}"
+                }
+              ]
+            },
+            "description": "HEAD asks for the headers only. The server answers without reading any claims, so a long period costs nothing. Needs 'Login as finance (Farah)', the first request in this folder.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenFinance}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"The same download headers as a GET\", function () { pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"text/csv\"); pm.expect(pm.response.headers.get(\"Content-Disposition\")).to.match(/attachment; filename=\"approved-claims_2000-01-01_\\d{4}-\\d{2}-\\d{2}\\.csv\"/); });",
+                  "pm.test(\"No body\", function () { pm.expect(pm.response.text()).to.eql(\"\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Finance exports a period with nothing approved -> header only",
           "request": {
             "method": "GET",
