@@ -97,3 +97,18 @@ export async function* approvedClaimBatches(from: Date, to: Date, batchSize: num
     cursor = { approvedAt: last.approvedAt, id: last.id };
   }
 }
+
+// One exported claim as the cells of its CSV row, in the order of EXPORT_HEADER
+export function toCsvFields(row: ExportRow): (string | number)[] {
+  return [
+    row.claimNumber,
+    row.id,
+    row.title,
+    row.claimantName,
+    row.claimantEmail,
+    row.submittedAt ? row.submittedAt.toISOString() : "",
+    row.approvedAt.toISOString(),
+    row.total,
+    row.lineItemCount,
+  ];
+}
