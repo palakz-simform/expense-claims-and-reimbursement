@@ -3,6 +3,7 @@ import { z } from "zod";
 import { Role } from "../generated/prisma/enums";
 import { approvalIdParamsSchema, listApprovalsQuerySchema, rejectApprovalSchema } from "../modules/approvals/approvals.schemas";
 import { loginSchema } from "../modules/auth/auth.schemas";
+import { exportQuerySchema } from "../modules/finance/finance.schemas";
 import { MAX_RECEIPTS_PER_LINE_ITEM, lineItemIdParamsSchema, receiptIdParamsSchema } from "../modules/receipts/receipts.schemas";
 import {
   claimIdParamsSchema,
@@ -539,6 +540,32 @@ registry.registerPath({
     403: errorResponse("Not a CLAIMANT"),
     404: errorResponse("No such receipt, or it belongs to someone else"),
     409: errorResponse("CLAIM_LOCKED (the claim is approved)"),
+  },
+});
+
+// --- Finance ---
+registry.registerPath({
+  method: "get",
+  path: "/finance/export",
+  tags: ["Finance"],
+  summary: "Export the approved claims of a period as CSV (FINANCE only)",
+  description:
+    "The period is the claims' FINAL approval date (approvedAt): from and to are YYYY-MM-DD, both required and both included, in UTC. " +
+    "Only APPROVED claims are exported, never pending, rejected or draft ones. One row per claim, oldest approval first: " +
+    "claimNumber, claimId, title, claimantName, claimantEmail, submittedAt, approvedAt (UTC ISO), total (the sum of its line items, 2 decimals), lineItemCount. " +
+    "The file is streamed in batches of 1000 claims, so any period is safe to request. It starts with a UTF-8 byte order mark, uses CRLF line ends, " +
+    "and a text cell that starts with = + - @ gets a leading quote so a spreadsheet cannot run it as a formula. " +
+    "A failure after the download has started cuts the connection (an incomplete file is never presented as complete).",
+  security: [{ [bearerAuth.name]: [] }],
+  request: { query: exportQuerySchema },
+  responses: {
+    200: {
+      description: "The CSV file (attachment named approved-claims_<from>_<to>.csv); only the header row when nothing was approved in the period",
+      content: { "text/csv": { schema: z.string() } },
+    },
+    400: errorResponse("VALIDATION_ERROR (from or to missing, not a real date, from later than to, unknown query field)"),
+    401: errorResponse("Missing, invalid or expired token"),
+    403: errorResponse("Not FINANCE"),
   },
 });
 
