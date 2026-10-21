@@ -98,17 +98,31 @@ export async function* approvedClaimBatches(from: Date, to: Date, batchSize: num
   }
 }
 
-// One exported claim as the cells of its CSV row, in the order of EXPORT_HEADER
-export function toCsvFields(row: ExportRow): (string | number)[] {
-  return [
-    row.claimNumber,
-    row.id,
-    row.title,
-    row.claimantName,
-    row.claimantEmail,
-    row.submittedAt ? row.submittedAt.toISOString() : "",
-    row.approvedAt.toISOString(),
-    row.total,
-    row.lineItemCount,
-  ];
+// One exported claim as a CSV record: the keys are the columns of EXPORT_HEADER
+export function toCsvRecord(row: ExportRow) {
+  return {
+    claimNumber: row.claimNumber,
+    claimId: row.id,
+    title: row.title,
+    claimantName: row.claimantName,
+    claimantEmail: row.claimantEmail,
+    submittedAt: row.submittedAt ? row.submittedAt.toISOString() : "",
+    approvedAt: row.approvedAt.toISOString(),
+    total: row.total,
+    lineItemCount: row.lineItemCount,
+  };
+}
+
+// The claims of the batches, one row at a time. Starts from the batch already read, so the caller can read it first.
+export async function* exportRows(
+  first: IteratorResult<ExportRow[]>,
+  batches: AsyncGenerator<ExportRow[]>,
+): AsyncGenerator<ReturnType<typeof toCsvRecord>> {
+  let step = first;
+  while (!step.done) {
+    for (const row of step.value) {
+      yield toCsvRecord(row);
+    }
+    step = await batches.next();
+  }
 }
