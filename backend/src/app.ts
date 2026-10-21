@@ -10,6 +10,7 @@ import { requestLogger } from "./middleware/requestLogger";
 import { approvalsRouter } from "./modules/approvals/approvals.routes";
 import { authProtectedRouter, authPublicRouter } from "./modules/auth/auth.routes";
 import { claimsRouter } from "./modules/claims/claims.routes";
+import { financeRouter } from "./modules/finance/finance.routes";
 import { receiptsRouter } from "./modules/receipts/receipts.routes";
 
 const app = express();
@@ -47,6 +48,7 @@ app.use("/auth", authProtectedRouter); // GET /auth/me
 app.use("/claims", claimsRouter); // claims CRUD and line item edits (/claims, /claims/:id, /claims/:id/line-items/...)
 app.use("/approvals", approvalsRouter); // the approver's queue, approve and reject
 app.use(receiptsRouter); // receipts: /line-items/:id/receipts and /receipts/:id
+app.use("/finance", financeRouter); // finance only: the approved-claims CSV export
 
 // 404 for unknown routes, then the central error handler (must be last)
 app.use(notFoundHandler);
