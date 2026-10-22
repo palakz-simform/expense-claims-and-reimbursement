@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import type {
+  ClaimHistoryQuery,
   CreateClaimInput,
   LineItemInput,
   ListClaimsQuery,
@@ -30,6 +31,15 @@ export async function getOne(req: Request, res: Response) {
   const claimId = req.params.id as string;
   const claim = await claimsService.getClaim(user, claimId);
   res.json(claim);
+}
+
+// GET /claims/:id/history?page=&pageSize=
+export async function history(req: Request, res: Response) {
+  const user = req.user!;
+  const claimId = req.params.id as string;
+  const query = req.query as unknown as ClaimHistoryQuery; // already validated and converted to numbers by validate()
+  const result = await claimsService.getClaimHistory(user, claimId, query);
+  res.json(result);
 }
 
 // PATCH /claims/:id: change the claim's own fields (the title)

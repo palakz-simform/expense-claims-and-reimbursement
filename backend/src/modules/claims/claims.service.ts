@@ -12,6 +12,7 @@ import { buildChain, resetChain } from "../approvals/approvals.service";
 import { receiptSelect, removeReceiptFiles, removeReceiptRows } from "../receipts/receipts.service";
 import { MAX_LINE_ITEMS } from "./claims.schemas";
 import type {
+  ClaimHistoryQuery,
   CreateClaimInput,
   LineItemInput,
   ListClaimsQuery,
@@ -129,6 +130,44 @@ export async function getClaim(user: AuthUser, id: string) {
       return { ...toClaimResponse(claim, total), lastRejection };
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }, // RepeatableRead ensures all queries in the transaction see the same consistent snapshot, even if other transactions modify the data.
+  );
+}
+
+// The audit trail of a claim the caller may see, oldest first, one page at a time.
+// Scope first (a claim outside it is a 404, exactly like a missing one), then the page of history rows.
+export async function getClaimHistory(user: AuthUser, claimId: string, query: ClaimHistoryQuery) {
+  const { page, pageSize } = query;
+
+  return prisma.$transaction(
+    async (tx) => {
+      const claim = await tx.claim.findFirst({ where: { id: claimId, ...claimScopeFor(user) }, select: { id: true } });
+      if (!claim) {
+        throw new AppError(404, "NOT_FOUND", "Claim not found");
+      }
+
+      // id is a tie-breaker, so rows written at the same instant keep a stable order across pages
+      const [entries, totalItems] = await Promise.all([
+        tx.claimHistory.findMany({
+          where: { claimId },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          select: {
+            id: true,
+            action: true,
+            reason: true,
+            metadata: true,
+            createdAt: true,
+            performedBy: { select: { name: true, role: true } }, // who did it: name and role, never the email
+          },
+        }),
+        tx.claimHistory.count({ where: { claimId } }),
+      ]);
+
+      const totalPages = Math.ceil(totalItems / pageSize);
+      return { data: entries, pagination: { page, pageSize, totalItems, totalPages } };
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }, // the page and the count come from one snapshot
   );
 }
 

@@ -4,6 +4,7 @@ import { requireRole } from "../../middleware/requireRole";
 import { validate } from "../../middleware/validate";
 import * as controller from "./claims.controller";
 import {
+  claimHistoryQuerySchema,
   claimIdParamsSchema,
   createClaimSchema,
   lineItemParamsSchema,
@@ -27,6 +28,14 @@ claimsRouter.get(
   requireRole(Role.CLAIMANT, Role.APPROVER, Role.FINANCE),
   validate({ params: claimIdParamsSchema }),
   controller.getOne,
+);
+
+// The audit trail: read by anyone who may see the claim (same scope as the claim itself)
+claimsRouter.get(
+  "/:id/history",
+  requireRole(Role.CLAIMANT, Role.APPROVER, Role.FINANCE),
+  validate({ params: claimIdParamsSchema, query: claimHistoryQuerySchema }),
+  controller.history,
 );
 
 claimsRouter.patch(
