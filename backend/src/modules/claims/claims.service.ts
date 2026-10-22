@@ -127,7 +127,21 @@ export async function getClaim(user: AuthUser, id: string) {
         rejectedBy: rejection.approver.name,
       };
 
-      return { ...toClaimResponse(claim, total), lastRejection };
+      // Where the claim is in its approval chain: the LIVE chain only (earlier versions were voided), one entry per level.
+      // A draft has no chain yet (version 0), so this is an empty list for it.
+      const steps = await tx.approval.findMany({
+        where: { claimId: claim.id, chainVersion: claim.currentApprovalVersion },
+        orderBy: { level: "asc" },
+        select: { level: true, status: true, decidedAt: true, approver: { select: { name: true } } }, // the approver's name, never the email
+      });
+      const approvals = steps.map((step) => ({
+        level: step.level,
+        status: step.status,
+        approverName: step.approver.name,
+        decidedAt: step.decidedAt,
+      }));
+
+      return { ...toClaimResponse(claim, total), lastRejection, approvals };
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }, // RepeatableRead ensures all queries in the transaction see the same consistent snapshot, even if other transactions modify the data.
   );
