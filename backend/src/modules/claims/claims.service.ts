@@ -3,6 +3,7 @@ import { AppError } from "../../lib/AppError";
 import { logger } from "../../lib/logger";
 import { lockClaim, lockEditableClaim, type LockedClaim } from "../../lib/claimLock";
 import { claimScopeFor } from "../../lib/claimScope";
+import { recordHistory } from "../../lib/recordHistory";
 import { getClaimTotal, getClaimTotals } from "../../lib/claimTotal";
 import { Prisma } from "../../generated/prisma/client";
 import { ApprovalStatus, ClaimStatus } from "../../generated/prisma/enums";
@@ -85,13 +86,11 @@ export async function createClaim(user: AuthUser, input: CreateClaimInput) {
     const total = await getClaimTotal(claim.id, tx);
 
     // Audit trail: written in the same transaction as the change
-    await tx.claimHistory.create({
-      data: {
-        claimId: claim.id,
-        action: "CLAIM_CREATED",
-        performedById: user.id,
-        metadata: { total: total.toFixed(2), lineItemCount: claim.lineItems.length },
-      },
+    await recordHistory(tx, {
+      claimId: claim.id,
+      action: "CLAIM_CREATED",
+      performedById: user.id,
+      metadata: { total: total.toFixed(2), lineItemCount: claim.lineItems.length },
     });
 
     return toClaimResponse(claim, total);
@@ -245,13 +244,11 @@ async function startApproval(
   });
 
   // Audit trail: written in the same transaction as the change
-  await tx.claimHistory.create({
-    data: {
-      claimId,
-      action,
-      performedById: user.id,
-      metadata: { total: total.toFixed(2), levels: approvals.length, chainVersion },
-    },
+  await recordHistory(tx, {
+    claimId,
+    action,
+    performedById: user.id,
+    metadata: { total: total.toFixed(2), levels: approvals.length, chainVersion },
   });
 }
 
@@ -322,17 +319,15 @@ async function runClaimEdit(
     const newTotal = await getClaimTotal(claimId, tx);
 
     // Audit trail: edits to a claim that was already submitted are recorded, in the same transaction
-    await tx.claimHistory.create({
-      data: {
-        claimId,
-        action: "CLAIM_UPDATED",
-        performedById: user.id,
-        metadata: {
-          change: result.change,
-          itemId: result.itemId ?? null,
-          oldTotal: oldTotal.toFixed(2),
-          newTotal: newTotal.toFixed(2),
-        },
+    await recordHistory(tx, {
+      claimId,
+      action: "CLAIM_UPDATED",
+      performedById: user.id,
+      metadata: {
+        change: result.change,
+        itemId: result.itemId ?? null,
+        oldTotal: oldTotal.toFixed(2),
+        newTotal: newTotal.toFixed(2),
       },
     });
 
