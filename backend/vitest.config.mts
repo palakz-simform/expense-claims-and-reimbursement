@@ -10,7 +10,7 @@ export default defineConfig({
     include: ["tests/**/*.test.ts"],
     globalSetup: ["tests/globalSetup.ts"], // refuses to run against the wrong database
     // Every query is a network round trip to Neon, so allow plenty of time
-    testTimeout: 60_000,
+    testTimeout: 120_000,
     hookTimeout: 60_000,
     // One file at a time: simpler, and the tests share one database
     fileParallelism: false,
