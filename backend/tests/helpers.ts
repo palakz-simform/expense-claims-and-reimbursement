@@ -46,6 +46,22 @@ export async function createClaimAs(who: Who, amounts: string[], title = "[test]
   return res.body as { id: string; lineItems: { id: string }[] };
 }
 
+// A claim that is already APPROVED, for the tests of locked claims. An approved claim can never be deleted, so it is
+// created ONCE (through the real flow: create, submit, approve) and reused by every later run.
+const APPROVED_FIXTURE_TITLE = "[test fixture] locked claim";
+
+export async function ensureApprovedClaim() {
+  const find = () => prisma.claim.findFirst({ where: { title: APPROVED_FIXTURE_TITLE, status: "APPROVED" }, select: { id: true, lineItems: { select: { id: true } } } });
+  const existing = await find();
+  if (existing) return existing;
+
+  const asha = await authAs("asha.claimant");
+  const created = await api.post("/claims").set(asha).send({ title: APPROVED_FIXTURE_TITLE, lineItems: [lineItem("123.00")] }).expect(201);
+  await api.post(`/claims/${created.body.id}/submit`).set(asha).expect(200);
+  await api.post(`/approvals/${await pendingStepOf(created.body.id, "ravi.l1")}/approve`).set(await authAs("ravi.l1")).expect(200);
+  return (await find())!;
+}
+
 // The id of the approval step an approver can decide right now for a claim
 export async function pendingStepOf(claimId: string, approver: Who) {
   const step = await prisma.approval.findFirstOrThrow({ where: { claimId, approverId: await userId(approver), status: "PENDING" }, select: { id: true } });
