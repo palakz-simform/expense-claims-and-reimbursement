@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from "vitest";
-import { api, authAs, cleanUp, createClaimAs, lineItem, prisma } from "./helpers";
+import { api, authAs, cleanUp, createClaimAs, lineItem, prisma, rememberForCleanUp } from "./helpers";
 
 afterAll(async () => {
   await cleanUp();
@@ -18,6 +18,7 @@ describe("the claim total cannot desynchronise from its line items", () => {
 
     // On create
     const create = await api.post("/claims").set(asha).send({ title: "[test] with total", total: "1.00", lineItems: [lineItem("10.00")] });
+    if (create.body.id) rememberForCleanUp(create.body.id); // only happens if the rule is broken: do not leave the claim behind
     expect(create.status).toBe(400);
     expect(create.body.error.code).toBe("VALIDATION_ERROR");
 

@@ -34,6 +34,11 @@ export const lineItem = (amount: string, description = "test item") => ({
 // Approved claims are locked by database triggers and cannot be deleted, so tests must end their claims pending or rejected.
 const createdClaimIds: string[] = [];
 
+// For a claim a test did NOT expect to create (for example when a rule it checks is broken): still remove it afterwards
+export function rememberForCleanUp(claimId: string) {
+  createdClaimIds.push(claimId);
+}
+
 export async function createClaimAs(who: Who, amounts: string[], title = "[test] claim") {
   const res = await api.post("/claims").set(await authAs(who)).send({ title, lineItems: amounts.map((a) => lineItem(a)) });
   if (res.status !== 201) throw new Error(`Could not create the test claim: ${res.status} ${JSON.stringify(res.body)}`);
