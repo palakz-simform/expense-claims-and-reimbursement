@@ -3,6 +3,7 @@ import { AppError } from "../../lib/AppError";
 import { logger } from "../../lib/logger";
 import { lockClaim, lockEditableClaim, type LockedClaim } from "../../lib/claimLock";
 import { claimScopeFor } from "../../lib/claimScope";
+import { recordHistory } from "../../lib/recordHistory";
 import { getClaimTotal, getClaimTotals } from "../../lib/claimTotal";
 import { Prisma } from "../../generated/prisma/client";
 import { ApprovalStatus, ClaimStatus } from "../../generated/prisma/enums";
@@ -11,6 +12,7 @@ import { buildChain, resetChain } from "../approvals/approvals.service";
 import { receiptSelect, removeReceiptFiles, removeReceiptRows } from "../receipts/receipts.service";
 import { MAX_LINE_ITEMS } from "./claims.schemas";
 import type {
+  ClaimHistoryQuery,
   CreateClaimInput,
   LineItemInput,
   ListClaimsQuery,
@@ -85,13 +87,11 @@ export async function createClaim(user: AuthUser, input: CreateClaimInput) {
     const total = await getClaimTotal(claim.id, tx);
 
     // Audit trail: written in the same transaction as the change
-    await tx.claimHistory.create({
-      data: {
-        claimId: claim.id,
-        action: "CLAIM_CREATED",
-        performedById: user.id,
-        metadata: { total: total.toFixed(2), lineItemCount: claim.lineItems.length },
-      },
+    await recordHistory(tx, {
+      claimId: claim.id,
+      action: "CLAIM_CREATED",
+      performedById: user.id,
+      metadata: { total: total.toFixed(2), lineItemCount: claim.lineItems.length },
     });
 
     return toClaimResponse(claim, total);
@@ -127,9 +127,61 @@ export async function getClaim(user: AuthUser, id: string) {
         rejectedBy: rejection.approver.name,
       };
 
-      return { ...toClaimResponse(claim, total), lastRejection };
+      // Where the claim is in its approval chain: the LIVE chain only (earlier versions were voided), one entry per level.
+      // A draft has no chain yet (version 0), so this is an empty list for it.
+      const steps = await tx.approval.findMany({
+        where: { claimId: claim.id, chainVersion: claim.currentApprovalVersion },
+        orderBy: { level: "asc" },
+        select: { level: true, status: true, decidedAt: true, approver: { select: { name: true } } }, // the approver's name, never the email
+      });
+      const approvals = steps.map((step) => ({
+        level: step.level,
+        status: step.status,
+        approverName: step.approver.name,
+        decidedAt: step.decidedAt,
+      }));
+
+      return { ...toClaimResponse(claim, total), lastRejection, approvals };
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }, // RepeatableRead ensures all queries in the transaction see the same consistent snapshot, even if other transactions modify the data.
+  );
+}
+
+// The audit trail of a claim the caller may see, oldest first, one page at a time.
+// Scope first (a claim outside it is a 404, exactly like a missing one), then the page of history rows.
+export async function getClaimHistory(user: AuthUser, claimId: string, query: ClaimHistoryQuery) {
+  const { page, pageSize } = query;
+
+  return prisma.$transaction(
+    async (tx) => {
+      const claim = await tx.claim.findFirst({ where: { id: claimId, ...claimScopeFor(user) }, select: { id: true } });
+      if (!claim) {
+        throw new AppError(404, "NOT_FOUND", "Claim not found");
+      }
+
+      // id is a tie-breaker, so rows written at the same instant keep a stable order across pages
+      const [entries, totalItems] = await Promise.all([
+        tx.claimHistory.findMany({
+          where: { claimId },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          select: {
+            id: true,
+            action: true,
+            reason: true,
+            metadata: true,
+            createdAt: true,
+            performedBy: { select: { name: true, role: true } }, // who did it: name and role, never the email
+          },
+        }),
+        tx.claimHistory.count({ where: { claimId } }),
+      ]);
+
+      const totalPages = Math.ceil(totalItems / pageSize);
+      return { data: entries, pagination: { page, pageSize, totalItems, totalPages } };
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }, // the page and the count come from one snapshot
   );
 }
 
@@ -245,13 +297,11 @@ async function startApproval(
   });
 
   // Audit trail: written in the same transaction as the change
-  await tx.claimHistory.create({
-    data: {
-      claimId,
-      action,
-      performedById: user.id,
-      metadata: { total: total.toFixed(2), levels: approvals.length, chainVersion },
-    },
+  await recordHistory(tx, {
+    claimId,
+    action,
+    performedById: user.id,
+    metadata: { total: total.toFixed(2), levels: approvals.length, chainVersion },
   });
 }
 
@@ -322,17 +372,15 @@ async function runClaimEdit(
     const newTotal = await getClaimTotal(claimId, tx);
 
     // Audit trail: edits to a claim that was already submitted are recorded, in the same transaction
-    await tx.claimHistory.create({
-      data: {
-        claimId,
-        action: "CLAIM_UPDATED",
-        performedById: user.id,
-        metadata: {
-          change: result.change,
-          itemId: result.itemId ?? null,
-          oldTotal: oldTotal.toFixed(2),
-          newTotal: newTotal.toFixed(2),
-        },
+    await recordHistory(tx, {
+      claimId,
+      action: "CLAIM_UPDATED",
+      performedById: user.id,
+      metadata: {
+        change: result.change,
+        itemId: result.itemId ?? null,
+        oldTotal: oldTotal.toFixed(2),
+        newTotal: newTotal.toFixed(2),
       },
     });
 

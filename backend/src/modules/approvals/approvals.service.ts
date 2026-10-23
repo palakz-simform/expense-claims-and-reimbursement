@@ -1,5 +1,6 @@
 import { prisma } from "../../db/prisma";
 import { AppError } from "../../lib/AppError";
+import { recordHistory } from "../../lib/recordHistory";
 import { requiredLevels } from "../../lib/approvalPolicy";
 import { lockClaimById } from "../../lib/claimLock";
 import { getClaimTotal, getClaimTotals } from "../../lib/claimTotal";
@@ -88,17 +89,15 @@ export async function resetChain(
   await tx.claim.update({ where: { id: claimId }, data: { currentApprovalVersion: newVersion } });
 
   // Audit trail: written in the same transaction as the change
-  await tx.claimHistory.create({
-    data: {
-      claimId,
-      action: "APPROVAL_CHAIN_RESET",
-      performedById: user.id,
-      metadata: {
-        oldTotal: oldTotal.toFixed(2),
-        newTotal: newTotal.toFixed(2),
-        previousApprovalVersion: previousVersion,
-        newApprovalVersion: newVersion,
-      },
+  await recordHistory(tx, {
+    claimId,
+    action: "APPROVAL_CHAIN_RESET",
+    performedById: user.id,
+    metadata: {
+      oldTotal: oldTotal.toFixed(2),
+      newTotal: newTotal.toFixed(2),
+      previousApprovalVersion: previousVersion,
+      newApprovalVersion: newVersion,
     },
   });
 }
@@ -196,13 +195,11 @@ export async function approveApproval(user: AuthUser, approvalId: string) {
     }
 
     // Audit trail: written in the same transaction as the change
-    await tx.claimHistory.create({
-      data: {
-        claimId,
-        action: "APPROVAL_GRANTED",
-        performedById: user.id,
-        metadata: { level: approval.level, chainVersion: approval.chainVersion },
-      },
+    await recordHistory(tx, {
+      claimId,
+      action: "APPROVAL_GRANTED",
+      performedById: user.id,
+      metadata: { level: approval.level, chainVersion: approval.chainVersion },
     });
 
     // The next level of this chain, or null if this was the last
@@ -217,13 +214,11 @@ export async function approveApproval(user: AuthUser, approvalId: string) {
       // Last level approved: the claim is approved and locked from here on
       await tx.claim.update({ where: { id: claimId }, data: { status: ClaimStatus.APPROVED, approvedAt: decidedAt } });
       const total = await getClaimTotal(claimId, tx);
-      await tx.claimHistory.create({
-        data: {
-          claimId,
-          action: "CLAIM_APPROVED",
-          performedById: user.id,
-          metadata: { total: total.toFixed(2), levels: approval.level, chainVersion: approval.chainVersion },
-        },
+      await recordHistory(tx, {
+        claimId,
+        action: "CLAIM_APPROVED",
+        performedById: user.id,
+        metadata: { total: total.toFixed(2), levels: approval.level, chainVersion: approval.chainVersion },
       });
     }
 
@@ -267,14 +262,12 @@ export async function rejectApproval(user: AuthUser, approvalId: string, reason:
     await tx.claim.update({ where: { id: claimId }, data: { status: ClaimStatus.REJECTED } });
 
     // Audit trail: written in the same transaction as the change
-    await tx.claimHistory.create({
-      data: {
-        claimId,
-        action: "CLAIM_REJECTED",
-        performedById: user.id,
-        reason,
-        metadata: { level: approval.level, chainVersion: approval.chainVersion },
-      },
+    await recordHistory(tx, {
+      claimId,
+      action: "CLAIM_REJECTED",
+      performedById: user.id,
+      reason,
+      metadata: { level: approval.level, chainVersion: approval.chainVersion },
     });
 
     return {

@@ -68,7 +68,11 @@ export const listClaimsQuerySchema = paginationQuerySchema
   });
 
 export type CreateClaimInput = z.infer<typeof createClaimSchema>;
+// GET /claims/:id/history: the shared page number and page size
+export const claimHistoryQuerySchema = paginationQuerySchema;
+
 export type ListClaimsQuery = z.infer<typeof listClaimsQuerySchema>;
+export type ClaimHistoryQuery = z.infer<typeof claimHistoryQuerySchema>;
 export type LineItemInput = z.infer<typeof lineItemSchema>;
 export type UpdateClaimInput = z.infer<typeof updateClaimSchema>;
 export type UpdateLineItemInput = z.infer<typeof updateLineItemSchema>;

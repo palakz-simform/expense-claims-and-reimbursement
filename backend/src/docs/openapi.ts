@@ -6,6 +6,7 @@ import { loginSchema } from "../modules/auth/auth.schemas";
 import { exportQuerySchema } from "../modules/finance/finance.schemas";
 import { MAX_RECEIPTS_PER_LINE_ITEM, lineItemIdParamsSchema, receiptIdParamsSchema } from "../modules/receipts/receipts.schemas";
 import {
+  claimHistoryQuerySchema,
   claimIdParamsSchema,
   createClaimSchema,
   lineItemParamsSchema,
@@ -147,7 +148,16 @@ registry.registerPath({
 });
 
 // GET /claims/{id} also says why the claim was last rejected (kept after a resubmit; null if never rejected)
+// Where the claim is in its approval chain: the LIVE chain only, one entry per level (earlier chains are in the history)
+const approvalStepSchema = z.object({
+  level: z.number().int(),
+  status: z.enum(["WAITING", "PENDING", "APPROVED", "REJECTED", "INVALIDATED"]),
+  approverName: z.string(),
+  decidedAt: z.string().nullable(),
+});
+
 const claimWithRejectionSchema = claimResponseSchema.extend({
+  approvals: z.array(approvalStepSchema),
   lastRejection: z
     .object({
       reason: z.string().nullable(),
@@ -200,12 +210,69 @@ registry.registerPath({
   summary: "Get one claim you may see",
   description:
     "Any role, limited to the same scope as the list. " +
-    "lastRejection is set whenever the claim has ever been rejected (even after a resubmit), and null otherwise.",
+    "lastRejection is set whenever the claim has ever been rejected (even after a resubmit), and null otherwise. " +
+    "approvals is the current approval chain, one entry per level with its status, the approver's name and the decision time (empty for a draft); " +
+    "chains voided by an edit or a rejection are not listed here, they are in GET /claims/{id}/history.",
   security: [{ [bearerAuth.name]: [] }],
   request: { params: claimIdParamsSchema },
   responses: {
     200: { description: "The claim with its line items, computed total and last rejection", content: { "application/json": { schema: claimWithRejectionSchema } } },
     400: errorResponse("VALIDATION_ERROR (id is not a UUID)"),
+    401: errorResponse("Missing, invalid or expired token"),
+    404: errorResponse("No such claim, or it is outside your scope (the same answer, so existence is not revealed)"),
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/claims/{id}/history",
+  tags: ["Claims"],
+  summary: "The audit trail of a claim you may see, oldest first, one page at a time",
+  description:
+    "Any role, within the same scope as GET /claims/{id}; a claim outside it is a 404. Every change to a submitted claim is recorded here in the same " +
+    "transaction as the change itself: CLAIM_CREATED, CLAIM_SUBMITTED, CLAIM_RESUBMITTED, CLAIM_UPDATED (with the old and new total), APPROVAL_CHAIN_RESET, " +
+    "APPROVAL_GRANTED, CLAIM_APPROVED, CLAIM_REJECTED (with the reason), RECEIPT_ADDED and RECEIPT_REMOVED. Edits to a draft are not recorded (it was never submitted). " +
+    "performedBy is the actor's name and role, never the email. metadata holds structured details such as totals, levels and chainVersion.",
+  security: [{ [bearerAuth.name]: [] }],
+  request: { params: claimIdParamsSchema, query: claimHistoryQuerySchema },
+  responses: {
+    200: {
+      description: "One page of history entries and the pagination info",
+      content: {
+        "application/json": {
+          schema: z.object({
+            data: z.array(
+              z.object({
+                id: z.string(),
+                action: z.enum([
+                  "CLAIM_CREATED",
+                  "CLAIM_UPDATED",
+                  "CLAIM_SUBMITTED",
+                  "APPROVAL_GRANTED",
+                  "CLAIM_APPROVED",
+                  "CLAIM_REJECTED",
+                  "CLAIM_RESUBMITTED",
+                  "APPROVAL_CHAIN_RESET",
+                  "RECEIPT_ADDED",
+                  "RECEIPT_REMOVED",
+                ]),
+                reason: z.string().nullable(),
+                metadata: z.record(z.string(), z.unknown()).nullable(),
+                createdAt: z.string(),
+                performedBy: z.object({ name: z.string(), role: z.enum(Object.values(Role) as [Role, ...Role[]]) }),
+              }),
+            ),
+            pagination: z.object({
+              page: z.number().int(),
+              pageSize: z.number().int(),
+              totalItems: z.number().int(),
+              totalPages: z.number().int(),
+            }),
+          }),
+        },
+      },
+    },
+    400: errorResponse("VALIDATION_ERROR (id is not a UUID, page below 1, pageSize above 100, unknown query field)"),
     401: errorResponse("Missing, invalid or expired token"),
     404: errorResponse("No such claim, or it is outside your scope (the same answer, so existence is not revealed)"),
   },

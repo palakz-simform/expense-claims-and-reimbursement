@@ -5,6 +5,7 @@ import { AppError } from "../../lib/AppError";
 import { lockEditableClaim } from "../../lib/claimLock";
 import { claimScopeFor } from "../../lib/claimScope";
 import { logger } from "../../lib/logger";
+import { recordHistory, recordHistoryMany } from "../../lib/recordHistory";
 import { removeStoredFile, verifyReceiptFile } from "../../lib/receiptFiles";
 import type { Prisma } from "../../generated/prisma/client";
 import { ClaimStatus } from "../../generated/prisma/enums";
@@ -62,13 +63,11 @@ export async function addReceipt(user: AuthUser, lineItemId: string, file: Expre
 
       // Audit trail for a claim that was already submitted (a draft has no history yet)
       if (locked.status !== ClaimStatus.DRAFT) {
-        await tx.claimHistory.create({
-          data: {
-            claimId,
-            action: "RECEIPT_ADDED",
-            performedById: user.id,
-            metadata: { itemId: lineItemId, receiptId: receipt.id, mimeType: receipt.mimeType, sizeBytes: receipt.sizeBytes },
-          },
+        await recordHistory(tx, {
+          claimId,
+          action: "RECEIPT_ADDED",
+          performedById: user.id,
+          metadata: { itemId: lineItemId, receiptId: receipt.id, mimeType: receipt.mimeType, sizeBytes: receipt.sizeBytes },
         });
       }
 
@@ -129,13 +128,11 @@ export async function deleteReceipt(user: AuthUser, receiptId: string): Promise<
 
     // Audit trail for a claim that was already submitted (a draft has no history yet)
     if (locked.status !== ClaimStatus.DRAFT) {
-      await tx.claimHistory.create({
-        data: {
-          claimId,
-          action: "RECEIPT_REMOVED",
-          performedById: user.id,
-          metadata: { itemId: receipt.lineItemId, receiptId, originalName: receipt.originalName },
-        },
+      await recordHistory(tx, {
+        claimId,
+        action: "RECEIPT_REMOVED",
+        performedById: user.id,
+        metadata: { itemId: receipt.lineItemId, receiptId, originalName: receipt.originalName },
       });
     }
 
@@ -169,14 +166,15 @@ export async function removeReceiptRows(
 
   // A draft has no history yet; a submitted claim records each removed receipt
   if (claimStatus !== ClaimStatus.DRAFT) {
-    await tx.claimHistory.createMany({
-      data: receipts.map((receipt) => ({
+    await recordHistoryMany(
+      tx,
+      receipts.map((receipt) => ({
         claimId,
         action: "RECEIPT_REMOVED" as const,
         performedById: user.id,
         metadata: { itemId: receipt.lineItemId, receiptId: receipt.id, originalName: receipt.originalName },
       })),
-    });
+    );
   }
 
   return receipts.map((receipt) => receipt.storedName);
