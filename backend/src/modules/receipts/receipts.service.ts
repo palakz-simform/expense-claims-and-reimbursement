@@ -1,5 +1,3 @@
-import path from "node:path";
-import { env } from "../../config/env";
 import { prisma } from "../../db/prisma";
 import { AppError } from "../../lib/AppError";
 import { lockEditableClaim } from "../../lib/claimLock";
@@ -7,6 +5,7 @@ import { claimScopeFor } from "../../lib/claimScope";
 import { logger } from "../../lib/logger";
 import { recordHistory, recordHistoryMany } from "../../lib/recordHistory";
 import { removeStoredFile, verifyReceiptFile } from "../../lib/receiptFiles";
+import { receiptStorage } from "../../lib/storage";
 import type { Prisma } from "../../generated/prisma/client";
 import { ClaimStatus } from "../../generated/prisma/enums";
 import type { AuthUser } from "../../types/express";
@@ -22,11 +21,20 @@ export const receiptSelect = {
   uploadedAt: true,
 } as const;
 
-// The file multer already saved. If anything below fails, the file is deleted so nothing is orphaned.
+// The file multer saved in the temp folder. It is checked, handed to the storage, then the temp copy is always removed.
+// If anything fails after the storage took it, the stored file is deleted too, so nothing is orphaned.
 export async function addReceipt(user: AuthUser, lineItemId: string, file: Express.Multer.File) {
+  const key = file.filename;
+  let storedInStorage = false;
+
   try {
     // Cheap check first: the content must really be the type the client claimed
     await verifyReceiptFile(file.path, file.mimetype);
+
+    // Stored BEFORE the transaction: a slow upload must never hold the claim lock. The cost is that a request refused
+    // below (wrong owner, limit reached) uploads once and deletes again, which is rare and cleaned up in the catch.
+    await receiptStorage.save(key, file.path, file.mimetype);
+    storedInStorage = true;
 
     return await prisma.$transaction(async (tx) => {
       // Find which claim the item belongs to. The claim lock below proves it is the caller's own (else 404).
@@ -74,15 +82,22 @@ export async function addReceipt(user: AuthUser, lineItemId: string, file: Expre
       return receipt;
     });
   } catch (error) {
-    // Nothing was saved, so the uploaded file must go; a failed cleanup is logged, not allowed to hide the real error
-    await removeStoredFile(file.path).catch((cleanupError) => {
-      logger.error({ err: cleanupError, file: file.filename }, "Could not delete an uploaded receipt file");
-    });
+    // No receipt row was saved, so the stored file must go; a failed cleanup is logged, not allowed to hide the real error
+    if (storedInStorage) {
+      await receiptStorage.remove(key).catch((cleanupError) => {
+        logger.error({ err: cleanupError, key }, "Could not delete an uploaded receipt file");
+      });
+    }
     throw error;
+  } finally {
+    // The temp copy is never needed after this request, whatever the outcome
+    await removeStoredFile(file.path).catch((cleanupError) => {
+      logger.error({ err: cleanupError, file: file.filename }, "Could not delete a temporary upload");
+    });
   }
 }
 
-// Finds a receipt the caller may see and where its file is. The claim scope is IN the query, so a receipt
+// Finds a receipt the caller may see and opens its file. The claim scope is IN the query, so a receipt
 // of a claim outside the caller's scope is simply not found (404), exactly like one that does not exist.
 export async function getReceiptFile(user: AuthUser, receiptId: string) {
   const receipt = await prisma.receipt.findFirst({
@@ -93,14 +108,10 @@ export async function getReceiptFile(user: AuthUser, receiptId: string) {
     throw new AppError(404, "NOT_FOUND", "Receipt not found");
   }
 
-  const filePath = storedFilePath(receipt.storedName);
+  // Throws StoredFileNotFoundError when the row exists but the file does not (the controller answers 404)
+  const stream = await receiptStorage.open(receipt.storedName);
 
-  return { filePath, originalName: receipt.originalName, mimeType: receipt.mimeType };
-}
-
-// Where a stored receipt lives. basename keeps the path inside UPLOAD_DIR even if a stored name were ever tampered with.
-function storedFilePath(storedName: string): string {
-  return path.join(env.UPLOAD_DIR, path.basename(storedName));
+  return { stream, originalName: receipt.originalName, mimeType: receipt.mimeType };
 }
 
 // Remove a receipt: the row, the history, then (after the commit) the file.
@@ -140,7 +151,7 @@ export async function deleteReceipt(user: AuthUser, receiptId: string): Promise<
   });
 
   // Only after the commit: if the delete had failed, the file must still be there. A failure here leaves an orphan file, so it is logged.
-  await removeStoredFile(storedFilePath(storedName)).catch((error) => {
+  await receiptStorage.remove(storedName).catch((error) => {
     logger.error({ err: error, receiptId }, "Receipt row deleted but its file could not be removed");
   });
 }
@@ -184,7 +195,7 @@ export async function removeReceiptRows(
 export async function removeReceiptFiles(storedNames: string[]): Promise<void> {
   await Promise.all(
     storedNames.map((storedName) =>
-      removeStoredFile(storedFilePath(storedName)).catch((error) => {
+      receiptStorage.remove(storedName).catch((error) => {
         logger.error({ err: error, storedName }, "Receipt row deleted but its file could not be removed");
       }),
     ),

@@ -26,6 +26,23 @@ const envSchema = z.object({
     .min(1)
     .default("uploads")
     .transform((dir) => path.resolve(dir)),
+  // Where receipt files are kept: "local" = the UPLOAD_DIR folder, "s3" = an S3-compatible bucket (Neon Object Storage)
+  STORAGE_DRIVER: z.enum(["local", "s3"]).default("local"),
+  // Only needed when STORAGE_DRIVER=s3 (checked below). Neon's own variable names, so its values can be pasted as they are.
+  AWS_ENDPOINT_URL_S3: z.url().optional(),
+  AWS_REGION: z.string().min(1).optional(),
+  AWS_ACCESS_KEY_ID: z.string().min(1).optional(),
+  AWS_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+  S3_BUCKET: z.string().min(1).optional(),
+}).superRefine((values, context) => {
+  // Fail at boot, not on the first upload, when "s3" is chosen but a setting is missing
+  if (values.STORAGE_DRIVER !== "s3") return;
+  const required = ["AWS_ENDPOINT_URL_S3", "AWS_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "S3_BUCKET"] as const;
+  for (const name of required) {
+    if (!values[name]) {
+      context.addIssue({ code: "custom", path: [name], message: `${name} is required when STORAGE_DRIVER=s3` });
+    }
+  }
 });
 
 const parsed = envSchema.safeParse(process.env);
