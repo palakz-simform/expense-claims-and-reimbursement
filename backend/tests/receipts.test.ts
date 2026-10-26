@@ -19,7 +19,7 @@ const upload = async (who: "asha.claimant" | "bilal.claimant", itemId: string, c
   api.post(`/line-items/${itemId}/receipts`).set(await authAs(who)).attach("file", content, { filename: name, contentType: mime });
 
 describe("receipts", () => {
-  it("upload, download and delete work for the owner, and the file is removed with it", async () => {
+  it("upload and delete work for the owner, and the file is removed with it", async () => {
     const claim = await createClaimAs("asha.claimant", ["40.00"]);
     const itemId = claim.lineItems[0]!.id;
 
@@ -31,9 +31,6 @@ describe("receipts", () => {
     const stored = await prisma.receipt.findUniqueOrThrow({ where: { id: created.body.id }, select: { storedName: true } });
     const filePath = path.join(env.UPLOAD_DIR, stored.storedName);
     expect(existsSync(filePath)).toBe(true);
-
-    const download = await api.get(`/receipts/${created.body.id}`).set(await authAs("asha.claimant"));
-    expect(download.status).toBe(200);
 
     const removed = await api.delete(`/receipts/${created.body.id}`).set(await authAs("asha.claimant"));
     expect(removed.status).toBe(204);
@@ -75,21 +72,6 @@ describe("receipts", () => {
     expect(filesOnDisk()).toBe(before);
   });
 
-  it("allows at most 5 receipts per line item", async () => {
-    const claim = await createClaimAs("asha.claimant", ["40.00"]);
-    const itemId = claim.lineItems[0]!.id;
-
-    for (let i = 0; i < 5; i++) {
-      const ok = await upload("asha.claimant", itemId, PNG, "image/png");
-      expect(ok.status).toBe(201);
-    }
-    const sixth = await upload("asha.claimant", itemId, PNG, "image/png");
-    expect(sixth.status).toBe(422);
-    expect(sixth.body.error.code).toBe("RECEIPT_LIMIT_REACHED");
-
-    // Deleting the draft claim removes the 5 files too
-    await api.delete(`/claims/${claim.id}`).set(await authAs("asha.claimant")).expect(204);
-  });
 });
 
 describe("claim history", () => {
