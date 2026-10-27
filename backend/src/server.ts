@@ -7,8 +7,10 @@ import { logger } from "./lib/logger";
 // Time in-flight requests get to finish before we exit anyway
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 
-// Receipts are written here, so make sure the folder exists before taking requests
-mkdirSync(env.UPLOAD_DIR, { recursive: true });
+// With the local driver receipts are written here, so make sure the folder exists before taking requests
+if (env.STORAGE_DRIVER === "local") {
+  mkdirSync(env.UPLOAD_DIR, { recursive: true });
+}
 
 const server = app.listen(env.PORT, () => {
   logger.info({ port: env.PORT, env: env.NODE_ENV }, "API listening");

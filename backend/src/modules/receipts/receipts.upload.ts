@@ -1,14 +1,21 @@
 import { randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { RequestHandler } from "express";
 import multer from "multer";
-import { env } from "../../config/env";
 import { AppError } from "../../lib/AppError";
 import { MAX_RECEIPT_BYTES, RECEIPT_EXTENSIONS } from "../../lib/receiptFiles";
 
-// Where and under what name a file is saved. The name is random, so the client's filename can
-// never choose a path (path traversal) or overwrite another receipt.
+// A file lands here first (the storage driver then takes it, and the service removes this copy).
+// The temp folder is the same for every driver, so the checks below work the same everywhere.
+const UPLOAD_TEMP_DIR = path.join(os.tmpdir(), "expense-claims-uploads");
+mkdirSync(UPLOAD_TEMP_DIR, { recursive: true });
+
+// Under what name a file is saved. The name is random, so the client's filename can
+// never choose a path (path traversal) or overwrite another receipt. It also becomes the storage key.
 const storage = multer.diskStorage({
-  destination: env.UPLOAD_DIR,
+  destination: UPLOAD_TEMP_DIR,
   filename: (_req, file, callback) => {
     const extension = RECEIPT_EXTENSIONS[file.mimetype];
     callback(null, `${randomUUID()}${extension}`);
