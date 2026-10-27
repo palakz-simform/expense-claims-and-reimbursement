@@ -31,10 +31,21 @@ export async function addReceipt(user: AuthUser, lineItemId: string, file: Expre
     // Cheap check first: the content must really be the type the client claimed
     await verifyReceiptFile(file.path, file.mimetype);
 
+    // Authorize before the expensive work: someone else's line item is refused before anything is uploaded.
+    // (The transaction below still does the real checks under the claim lock.)
+    const owned = await prisma.lineItem.findFirst({
+      where: { id: lineItemId, claim: { claimantId: user.id } },
+      select: { id: true },
+    });
+    if (!owned) {
+      throw new AppError(404, "NOT_FOUND", "Line item not found");
+    }
+
     // Stored BEFORE the transaction: a slow upload must never hold the claim lock. The cost is that a request refused
-    // below (wrong owner, limit reached) uploads once and deletes again, which is rare and cleaned up in the catch.
-    await receiptStorage.save(key, file.path, file.mimetype);
+    // below (limit reached, claim locked) uploads once and deletes again, which is cleaned up in the catch.
+    // The flag is set first: if the upload fails after the bucket accepted it, the catch still tries to remove it.
     storedInStorage = true;
+    await receiptStorage.save(key, file.path, file.mimetype);
 
     return await prisma.$transaction(async (tx) => {
       // Find which claim the item belongs to. The claim lock below proves it is the caller's own (else 404).
