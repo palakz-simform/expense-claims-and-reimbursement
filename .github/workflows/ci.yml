@@ -1,0 +1,32 @@
+# CI: on every pull request, check that the backend type-checks and its tests pass.
+name: CI
+
+on:
+  pull_request:
+    branches: [dev, main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    # The tests make many round trips to Neon, so allow plenty of time
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    # Settings for the tests (the Neon `test` branch). There is no .env.test in CI, so they come from secrets.
+    env:
+      JWT_SECRET: ${{ secrets.TEST_JWT_SECRET }}
+      DATABASE_URL_POOLED: ${{ secrets.TEST_DATABASE_URL_POOLED }}
+      SEED_PASSWORD: ${{ secrets.TEST_SEED_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      # The Prisma client is generated, not committed
+      - run: npx prisma generate
+      - run: npx tsc --noEmit
+      - run: npm test

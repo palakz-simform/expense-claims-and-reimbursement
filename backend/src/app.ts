@@ -28,7 +28,11 @@ if (env.NODE_ENV !== "production") {
 
 // Middleware
 app.use(helmet()); // sets secure HTTP headers
-app.use(cors()); // allows cross-origin requests from the frontend
+// CORS: which browser origins may call the API. Production allows only the origins listed in CORS_ORIGIN
+// (an empty list means no cross-origin access at all); dev and tests stay open so a local frontend just works.
+// CORS is enforced by browsers only: it does not stop curl or Postman, so it is not a replacement for auth.
+const corsOrigin = env.NODE_ENV === "production" ? env.CORS_ORIGIN : true;
+app.use(cors({ origin: corsOrigin }));
 app.use(globalLimiter); // loose per-IP safety net for every route
 app.use(express.json({ limit: "100kb" })); // parses JSON request bodies into req.body (size capped)
 
