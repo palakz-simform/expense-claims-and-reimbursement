@@ -7,9 +7,10 @@ Detailed backend rules live in `backend/CLAUDE.md`. Domain rules (roles, status 
 
 ## Stack
 - Backend: Node.js, Express 5, TypeScript (strict), Zod, Prisma 7 with the `pg` driver adapter
-- Database: PostgreSQL on Neon (default branch for dev, a `test` branch for tests)
+- Database: PostgreSQL on Neon: `production` (the default branch, used by the live app), `dev` (local work) and `test` (tests), with `dev` and `test` as children of `production`
 - Auth: JWT issued by the backend, bcrypt password hashing
-- Files: Multer on a Docker volume (metadata in Postgres)
+- Files: Multer upload, then a storage interface: local disk (`STORAGE_DRIVER=local`, a Docker volume in Compose) or a private S3-compatible bucket (`s3`, Neon Object Storage; used in production). Metadata in Postgres
+- Hosting: Render web service built from `backend/Dockerfile`, auto-deployed on merge to `main`; CI with GitHub Actions on pull requests
 - Frontend: Vue 3 (Vite, TS, Pinia). Deliberately minimal; the backend is the learning goal
 - Containers: Docker Compose for frontend and backend (no database container; Neon is hosted)
 
@@ -33,6 +34,6 @@ STEPS.md    Local build plan (gitignored personal notes). Follow its phase order
 ## Git and safety
 - Commit only when asked. Conventional commits (`feat:`, `fix:`, `chore:`, `docs:`, `test:`), one logical change each.
 - **Never read, print, edit or commit** `backend/.env` or `backend/.env.test`; they hold Neon credentials. Update `backend/.env.example` (names only, no values) whenever a variable is added.
-- **Ask before** running migrations, destructive commands (`rm -rf`, `git reset --hard`, dropping data), or anything that writes to the Neon default branch. Run experiments against the `test` branch.
+- **Ask before** running migrations, destructive commands (`rm -rf`, `git reset --hard`, dropping data), or anything that writes to the Neon `production` or `dev` branch. Run experiments against the `test` branch.
 - Keep one root `.gitignore`. Do not add per-folder ones.
 - Do not install Neon or Prisma agent skills; they are not needed here.

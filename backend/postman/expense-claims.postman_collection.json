@@ -28,10 +28,6 @@
   ],
   "variable": [
     {
-      "key": "baseUrl",
-      "value": "http://localhost:4000"
-    },
-    {
       "key": "claimantEmail",
       "value": "asha.claimant@example.com"
     },
