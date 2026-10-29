@@ -1,0 +1,12 @@
+# Keep the build context small and never send secrets to Docker
+node_modules
+dist
+uploads
+tests
+postman
+src/generated
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store

@@ -1,0 +1,61 @@
+import express from "express";
+import cors from "cors";
+import helmet from "helmet";
+import { env } from "./config/env";
+import { createDocsRouter } from "./docs/swagger";
+import { globalLimiter } from "./middleware/rateLimit";
+import { authenticate } from "./middleware/authenticate";
+import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
+import { requestLogger } from "./middleware/requestLogger";
+import { approvalsRouter } from "./modules/approvals/approvals.routes";
+import { authProtectedRouter, authPublicRouter } from "./modules/auth/auth.routes";
+import { claimsRouter } from "./modules/claims/claims.routes";
+import { financeRouter } from "./modules/finance/finance.routes";
+import { receiptsRouter } from "./modules/receipts/receipts.routes";
+
+const app = express();
+
+// First of all: give the request an ID and log it when it finishes, so even requests that are
+// rejected later (rate limited, unauthenticated, invalid) are logged with their ID
+app.use(requestLogger);
+
+// API docs (Swagger UI). Mounted BEFORE helmet because helmet's default CSP blocks Swagger UI's
+// inline scripts, and BEFORE authenticate so the docs load without a token (use "Authorize" in the UI).
+// Disabled in production: a deliberate public exception to deny-by-default, so only expose it in dev.
+if (env.NODE_ENV !== "production") {
+  app.use(createDocsRouter());
+}
+
+// Middleware
+app.use(helmet()); // sets secure HTTP headers
+// CORS: which browser origins may call the API. Production allows only the origins listed in CORS_ORIGIN
+// (an empty list means no cross-origin access at all); dev and tests stay open so a local frontend just works.
+// CORS is enforced by browsers only: it does not stop curl or Postman, so it is not a replacement for auth.
+const corsOrigin = env.NODE_ENV === "production" ? env.CORS_ORIGIN : true;
+app.use(cors({ origin: corsOrigin }));
+app.use(globalLimiter); // loose per-IP safety net for every route
+app.use(express.json({ limit: "100kb" })); // parses JSON request bodies into req.body (size capped)
+
+// Public routes (the ONLY ones that work without a token)
+// Health check: lets Docker/monitoring confirm the API is up
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok" });
+});
+app.use("/auth", authPublicRouter); // POST /auth/login
+
+// Everything registered below this line requires a valid user (deny by default),
+// so a new route cannot be left unprotected by forgetting a middleware.
+app.use(authenticate);
+
+// Protected routes
+app.use("/auth", authProtectedRouter); // GET /auth/me
+app.use("/claims", claimsRouter); // claims CRUD and line item edits (/claims, /claims/:id, /claims/:id/line-items/...)
+app.use("/approvals", approvalsRouter); // the approver's queue, approve and reject
+app.use(receiptsRouter); // receipts: /line-items/:id/receipts and /receipts/:id
+app.use("/finance", financeRouter); // finance only: the approved-claims CSV export
+
+// 404 for unknown routes, then the central error handler (must be last)
+app.use(notFoundHandler);
+app.use(errorHandler);
+
+export default app;

@@ -19,32 +19,63 @@ The focus is backend correctness: data integrity, authorization, approval workfl
 
 | Role | Can do |
 |---|---|
-| CLAIMANT | Create, edit, submit and resubmit own claims; view own claims |
-| APPROVER | View claims in their queue and ones they decided; approve or reject with a reason |
-| FINANCE | View all claims (read-only); export approved claims for a period |
+| CLAIMANT | Create, edit, submit and resubmit own claims; upload and delete receipts; view own claims |
+| APPROVER | View claims they have a step on and download their receipts; approve or reject with a reason |
+| FINANCE | View all claims and download receipts (read-only); export approved claims for a period |
 
 Each user has one role. Approvers also have an `approvalLevel` (1 or 2).
 
 ## Key design decisions
 
-- **Claim total is derived.** There is no stored total; it is `SUM(lineItem.amount)`, so it cannot drift from the line items. Amounts use `Decimal(12,2)`.
-- **Receipts** belong to individual line items (a line item can have several).
+- **Claim total is derived.** There is no stored total; it is `SUM(lineItem.amount)`, so it cannot drift from the line items. Amounts use `Decimal(12,2)`. In the API, money (`amount`, `total`) is a **string with 2 decimals** (for example `"125.50"`), never a JSON number, and clients cannot send a `total` (unknown fields are rejected with 400).
+- **Receipts are attached per line item, not per claim** (the brief allows either; this is our documented choice). A line item can have zero or more receipts; a receipt is optional and is not required to submit. Why per line item: each receipt proves one specific expense, so approvers and finance can trace an amount to its evidence, and the approved-claim lock triggers apply at the same level as the amounts they protect.
+- **Receipt rules.** `POST /line-items/:id/receipts` takes one file (PDF, PNG or JPEG, at most 5 MB) in the multipart field `file`; a line item holds at most 5 receipts (`422 RECEIPT_LIMIT_REACHED`). The client's Content-Type is not trusted: the file's first bytes are checked too (`415 UNSUPPORTED_FILE_TYPE`), and a file over the limit is `413 FILE_TOO_LARGE`. The file is saved under a random name (never the client's file name, so no path traversal) in the configured storage, and the API never returns the stored name or path; the original name is kept only to show and to name the download. Receipts can be added or deleted while the claim is a draft, awaiting approval or rejected (approved is `409 CLAIM_LOCKED`, with a database trigger as backstop), by the claimant who owns the item, with the claim row locked so the 5-receipt cap holds under concurrent uploads. A receipt does not change the total, so it never resets the approval chain, and approvals already given stay valid. On a submitted claim every add and remove is recorded in `ClaimHistory` (`RECEIPT_ADDED`, `RECEIPT_REMOVED`); a draft has no history. `GET /receipts/:id` streams the file to the claimant, approvers and finance within the same claim scope as `GET /claims/:id` (out of scope is `404`), as a private attachment. Deleting a line item or a draft deletes its receipts: the rows go in the same transaction and the files are removed only after it commits, so a failed delete never loses a file. A receipt whose file is missing from the storage downloads as `404`. **Where files live** is chosen by `STORAGE_DRIVER`: `local` (default; the `UPLOAD_DIR` folder, a Docker volume in containers) or `s3` (a private S3-compatible bucket, Neon Object Storage; used when deployed because hosts like Render wipe local disks). The bucket is never public: files are only reachable through `GET /receipts/:id`, after the claim-scope check. Every upload lands in a temp folder first for the type and size checks, is then handed to the storage, and the temp copy is always removed. Receipts are listed on each line item of a claim response (`receipts`).
+- **Finance export.** `GET /finance/export?from=YYYY-MM-DD&to=YYYY-MM-DD` (finance only) downloads a CSV of approved claims. **The period is the final approval date (`approvedAt`), both days included, in UTC**; `from` and `to` are both required (so a forgotten `to` cannot export everything), and `from` later than `to` or a bad date is `400`. Only `APPROVED` claims are exported, never drafts, pending or rejected ones. One row per claim, oldest approval first: `claimNumber, claimId, title, claimantName, claimantEmail, submittedAt, approvedAt` (UTC ISO), `total` (the database `SUM` of the line items, 2 decimals) and `lineItemCount`. It never loads the period into memory: claims are read in batches of 1000 with keyset pagination (`WHERE (approvedAt, id) > cursor ORDER BY approvedAt, id LIMIT 1000`, served by the `Claim(status, approvedAt)` index), each batch picks its claims first and sums only those, and the rows are streamed to the client with backpressure (a slow client slows the reading, a client that leaves stops it). The CSV is encoded by `csv-stringify`: cells with commas, quotes or line breaks are quoted, a text cell starting with `=`, `+`, `-` or `@` gets a leading `'` so a spreadsheet cannot run it as a formula (CSV injection), and the file has a UTF-8 BOM and CRLF line ends so Excel opens it correctly. A failure after the download has started cuts the connection, so a short file is never mistaken for a complete one. Finance has read access only: every approve, reject, edit, submit and receipt route answers `403` to it.
 - **Status flow:** `DRAFT -> PENDING_APPROVAL -> APPROVED`, or `PENDING_APPROVAL -> REJECTED -> (edit, resubmit) -> PENDING_APPROVAL`. `APPROVED` is terminal and read-only.
-- **Approval routing:** total under ₹10,000 needs 1 approval; ₹10,000 or more needs 2 (level 1, then level 2).
-- **Amount change during approval:** any change to the total invalidates the current chain, increments `chainVersion`, and builds a new chain. The same approver is kept per level where possible. Old approval records are kept for audit.
+- **Approval routing (N levels):** the number of required levels comes from an ordered list of amount tiers in `lib/approvalPolicy.ts` (currently: from ₹0 level 1; from ₹10,000 levels 1 and 2). Each claimant has a fixed approver per level in `ApproverAssignment` (one row per claimant and level, set up by the seed because there is no admin UI). On submit, the chain is built by looping over `1..requiredLevels` and copying the claimant's assigned approver for each level onto an `Approval` row, so assignment changes later never affect claims already in flight. Adding a level 3 means one new tier in the policy plus assignment rows, with no schema change. If a claimant has no approver at a required level, submit fails with `422 NO_APPROVER_AVAILABLE`.
+- **Amount change during approval:** a claim awaiting approval can still be edited (line items or title). If an edit changes the **total**, every decision so far is void: the live approval rows (waiting, pending and already approved) become `INVALIDATED`, `chainVersion` goes up by one, and a new chain is built from level 1 for the new total. The approvers stay the same, because they come from the claimant's fixed assignments, so if Alice approved and Bob was pending, both are reset and Alice is asked again. The number of levels can change if the total crosses a tier (for example ₹9,000 to ₹12,000 adds level 2). An edit that leaves the total unchanged (a description, date, category or title change) does not reset anything, and neither does an edit to a draft or a rejected claim (a rejected claim has no live chain; resubmit builds a new one). Old approval rows are kept for audit, and every edit to a submitted claim is recorded in `ClaimHistory` (`CLAIM_UPDATED`, plus `APPROVAL_CHAIN_RESET` when the chain is rebuilt). A claim awaiting approval must keep at least one line item (`422 NO_LINE_ITEMS`); a draft or rejected claim may be emptied but cannot be submitted again until it has an item. An approved claim cannot be edited at all.
+- **Approving and rejecting:** an approver decides only their own step, and only while it is `PENDING` on the live chain (`GET /approvals` is the queue). Approve moves the next level to `PENDING`, or approves the claim when it was the last level. Reject needs a reason (`400` without one): the claim becomes `REJECTED`, earlier approvals stay, and the open steps become `INVALIDATED`. The claim row is locked before deciding, so a decision and a claimant edit never interleave, and a decision on a step voided by an edit is refused (`409 APPROVAL_NOT_PENDING`). Each decision writes `APPROVAL_GRANTED` or `CLAIM_REJECTED` (and `CLAIM_APPROVED` for the last level) in the same transaction.
+- **Rejection and resubmission:** a rejected claim goes back to the claimant with the reason (`lastRejection` on `GET /claims/:id`: reason, level, time and who rejected it). It stays editable but has no live chain, so edits never reset anything. `POST /claims/:id/resubmit` (only for a `REJECTED` claim, with at least one line item) starts a **new chain from level 1 with the same approvers** (one `chainVersion` higher) and moves the claim to `PENDING_APPROVAL`. Nothing is lost: the earlier approval rows, the rejection and its reason, the history and the original `submittedAt` all stay, and the resubmit is recorded as `CLAIM_RESUBMITTED`. `lastRejection` is kept after a resubmit and replaced if the claim is rejected again. Approvers come from the claimant's fixed assignments, so reassigning an approver between a rejection and the resubmit is out of scope for this POC.
 - **Approved claims are locked** in the service layer and by PostgreSQL triggers on line items and receipts.
-- **Audit trail:** every state change writes a `ClaimHistory` row in the same transaction.
-- **Visibility is enforced in queries.** An approver requesting a claim outside their queue gets `404`.
+- **Audit trail.** Every change to a submitted claim writes a `ClaimHistory` row in the same transaction as the change, so the row and the change are saved or rolled back together, and a refused change leaves no row. All writes go through one helper, `recordHistory(tx, ...)` in `lib/recordHistory.ts`, which the compiler only lets you call with a transaction client; nothing else writes to the table. Actions: `CLAIM_CREATED`, `CLAIM_SUBMITTED`, `CLAIM_RESUBMITTED`, `CLAIM_UPDATED` (with the old and new total), `APPROVAL_CHAIN_RESET`, `APPROVAL_GRANTED`, `CLAIM_APPROVED`, `CLAIM_REJECTED` (with the reason), `RECEIPT_ADDED` and `RECEIPT_REMOVED`. The only exceptions: edits to a draft (it was never submitted) and deleting a draft (its history goes with it; the deletion is only logged). `GET /claims/:id/history?page=&pageSize=` returns the trail oldest first, paginated, to anyone who may see the claim (same scope as `GET /claims/:id`; otherwise `404`), with the actor as a name and role only, never the email. `GET /claims/:id` also shows `approvals`: the live approval chain, one entry per level with its status, the approver's name and the decision time, so you can see who is holding the claim now. Chains voided by an edit or a rejection are not shown there; the full story, including earlier rounds, is in the history.
+- **Visibility is enforced in queries.** `claimScopeFor(user)` (one function in `lib/claimScope.ts`) returns the `where` for every claim read, so an out-of-scope claim is simply not found (`404`, never 403, so its existence is not revealed). A claimant sees their own claims; an approver sees claims where they have a `PENDING`, `APPROVED`, `REJECTED` or `INVALIDATED` step (a `WAITING` step stays hidden until their turn comes); finance sees all claims. Reads (`GET /claims`, `GET /claims/:id`) are open to all three roles within that scope; every write stays claimant-only. `GET /approvals` is the approver's to-do list (only steps they can decide now), while `GET /claims` is the read-only view of every claim they are involved in.
+- **Only drafts can be deleted.** A draft was never submitted, so `DELETE /claims/:id` removes it together with its line items and its own history. A submitted claim (pending, rejected or approved) is never deleted: its history and approvals are the audit trail finance may need in a dispute. Only the `title` of a claim can be edited (`PATCH /claims/:id`); the total is derived and the status follows the workflow.
+- **Lists are paginated, never loaded whole.** `GET /claims?page=1&pageSize=20` (`pageSize` at most 100) accepts optional filters `status`, `from` and `to` (see below) and returns `{ data, pagination: { page, pageSize, totalItems, totalPages } }`, newest first; list items have the computed `total` and `lineItemCount` but no line items. Totals for a page come from one grouped query.
+- **List filters.** `status` is one of `DRAFT`, `PENDING_APPROVAL`, `REJECTED`, `APPROVED`. `from` and `to` (`YYYY-MM-DD`) filter on `submittedAt` and are inclusive UTC calendar days (`to` includes the whole day). A draft has no `submittedAt`, so any date filter leaves drafts out. `from` later than `to`, a bad date, a bad status or an unknown query field is `400`. Filters are combined with the role's scope using `AND`, so a filter can only narrow what a user may see.
+- **Dates are calendar dates compared in UTC.** A line item's `date` (`YYYY-MM-DD`) must be a real date and cannot be later than today's date in UTC (server time). A user far west of UTC may therefore be able to enter a date that is still "tomorrow" on their own clock; the rule never rejects a valid past expense.
+
+## Logging and request IDs
+
+- Logs are structured JSON via `pino` (readable colours in development). `LOG_LEVEL` sets the minimum level (default `info`). Passwords, tokens and the `Authorization` header are redacted.
+- Every request gets a generated ID, returned in the `X-Request-Id` response header.
+- One log line per request when it finishes: method, URL, status, duration and request ID. Level follows the outcome: `info` (2xx/3xx), `warn` (4xx), `error` (5xx). `/health` is not logged.
+- Every error response has the same shape, `{ "error": { "code", "message", "requestId" } }`. `requestId` equals the `X-Request-Id` header, so a user can quote it and you can find that request's log line.
+- Invalid input (`400 VALIDATION_ERROR`) also has `details`: one `{ in, path, message }` per bad field (`in` is `body`, `query` or `params`), so a form can mark the right input. Schemas are `.strict()`, so unknown fields are rejected too.
+- Expected errors (our rules, 4xx) return their own code. Unexpected errors (bugs) always return a generic `500 INTERNAL_ERROR`; the message and stack trace appear only on that request's log line, never in the response.
+- On `SIGTERM` or `SIGINT` the server stops taking new requests, lets running ones finish, closes the database connection and exits (forced after 10 seconds). An unhandled rejection or uncaught exception is logged as `fatal`, then the process shuts down with exit code 1.
 
 ## Error codes (so far)
 
 | Case | Response |
 |---|---|
-| Claim outside my visibility | 404 |
-| Approve/reject outside my queue | 403 `NOT_YOUR_APPROVAL` |
+| Claim outside my visibility (or missing) | 404 `NOT_FOUND` |
+| Invalid list filter (bad `status` or date, `from` after `to`, unknown query field) | 400 `VALIDATION_ERROR` |
+| Approve/reject an approval that is not mine (or does not exist) | 404 `NOT_FOUND` (not 403, so its existence is not revealed) |
 | Approval no longer pending | 409 `APPROVAL_NOT_PENDING` |
-| Editing an approved claim | 409 `CLAIM_LOCKED` |
-| Submitting with no line items | 422 `NO_LINE_ITEMS` |
+| Editing an approved claim | 409 `CLAIM_LOCKED` (also raised by the database trigger as a backstop) |
+| Adding a line item to a claim that already has 100 | 422 `LINE_ITEM_LIMIT_REACHED` |
+| Deleting a claim that was already submitted (pending or rejected) | 409 `CLAIM_NOT_DELETABLE` (an approved one is 409 `CLAIM_LOCKED`) |
+| Submitting a claim that is not a draft | 409 `CLAIM_NOT_SUBMITTABLE` (an approved one is 409 `CLAIM_LOCKED`) |
+| Resubmitting a claim that is not rejected | 409 `CLAIM_NOT_RESUBMITTABLE` (an approved one is 409 `CLAIM_LOCKED`) |
+| A value that must be unique already exists | 409 `CONFLICT` |
+| Submitting or resubmitting with no line items, or removing the last line item of a claim awaiting approval | 422 `NO_LINE_ITEMS` |
+| Uploading a 6th receipt to a line item | 422 `RECEIPT_LIMIT_REACHED` |
+| Receipt over 5 MB | 413 `FILE_TOO_LARGE` |
+| Receipt that is not a PDF, PNG or JPEG (by Content-Type or by content) | 415 `UNSUPPORTED_FILE_TYPE` |
+| Receipt upload with no file, a wrong field name or several files | 400 `VALIDATION_ERROR` |
+| Finance export without `from` or `to`, with `from` after `to`, a bad date or an unknown query field | 400 `VALIDATION_ERROR` |
+| Finance export by anyone but finance | 403 `FORBIDDEN` |
+| Claimant has no approver at a required level | 422 `NO_APPROVER_AVAILABLE` |
 
 ## Project layout
 
@@ -58,8 +89,24 @@ STEPS.md    Build plan
 
 ## Setup (to be completed)
 
-1. Copy `.env.example` to `.env` and fill in the values (Neon `DATABASE_URL` and `DIRECT_URL`, `JWT_SECRET`, etc.).
-2. `docker compose up`
+1. Copy `backend/.env.example` to `backend/.env` and fill in the values (Neon `DATABASE_URL` (direct) and `DATABASE_URL_POOLED`, `JWT_SECRET`, etc.). Write values without quotes: `docker run --env-file` keeps quotes as part of the value. `STORAGE_DRIVER` (default `local`) chooses where receipts are stored: `local` uses `UPLOAD_DIR` (default `uploads`; in Docker a named volume so files survive restarts), `s3` uses an S3-compatible bucket and needs `S3_BUCKET`, `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (create a credential with the `storage:read` and `storage:write` scopes in Neon; read alone or write alone is not enough). Tests use the local driver. Scripts and tests run with `NODE_ENV=test` read `.env.test` instead (the Neon `test` branch).
+2. `docker compose up --build` (see "Run with Docker" below)
+
+## Run with Docker
+
+The backend ships as an image built from `backend/Dockerfile` (multi-stage, runs as the unprivileged `node` user). The database is Neon, so there is no database container.
+
+```
+docker compose up --build            # API on http://localhost:4000
+API_PORT=4001 docker compose up      # use another host port if 4000 is taken
+```
+
+- On every start the container runs `prisma migrate deploy` (applies only migrations not yet applied, never seeds) and then starts the API. A failed migration stops the start.
+- **First run on an empty database:** the container creates the tables, but users come from the seed, which is not run by the container. Run `npx prisma db seed` from `backend/` once (dev/test branches only; it refuses to run in production).
+- Settings come from `backend/.env` at run time and are never baked into the image (`.dockerignore` keeps `.env*` out of the build).
+- The container reports `healthy` in `docker compose ps` once `/health` answers.
+- The `receipts` named volume is mounted at `/app/uploads` and is used only with `STORAGE_DRIVER=local`. With `s3` it stays empty.
+- `docker compose down` removes the container and keeps the volume; `docker compose down -v` also deletes the volume.
 
 Seeded logins, how to run tests, the finance export date definition and the full API reference will be added later.
 
