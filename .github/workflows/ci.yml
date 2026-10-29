@@ -29,4 +29,6 @@ jobs:
       # The Prisma client is generated, not committed
       - run: npx prisma generate
       - run: npx tsc --noEmit
+      # TEMPORARY: show why the database check fails (message only, never the URL)
+      - run: node -e "const {Client}=require('pg');const c=new Client({connectionString:process.env.DATABASE_URL_POOLED});c.connect().then(()=>c.query('select count(*) from \"Claim\"')).then(r=>console.log('db ok, claims:',r.rows[0].count)).catch(e=>console.log('db error:',e.code,e.message)).finally(()=>c.end())"
       - run: npm test
