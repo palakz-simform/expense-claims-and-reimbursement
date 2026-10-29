@@ -89,8 +89,24 @@ STEPS.md    Build plan
 
 ## Setup (to be completed)
 
-1. Copy `.env.example` to `.env` and fill in the values (Neon `DATABASE_URL` and `DIRECT_URL`, `JWT_SECRET`, etc.). `STORAGE_DRIVER` (default `local`) chooses where receipts are stored: `local` uses `UPLOAD_DIR` (default `uploads`; in Docker a named volume so files survive restarts), `s3` uses an S3-compatible bucket and needs `S3_BUCKET`, `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (create a credential with the `storage:read` and `storage:write` scopes in Neon; read alone or write alone is not enough). Tests use the local driver. Scripts and tests run with `NODE_ENV=test` read `.env.test` instead (the Neon `test` branch).
-2. `docker compose up`
+1. Copy `backend/.env.example` to `backend/.env` and fill in the values (Neon `DATABASE_URL` (direct) and `DATABASE_URL_POOLED`, `JWT_SECRET`, etc.). Write values without quotes: `docker run --env-file` keeps quotes as part of the value. `STORAGE_DRIVER` (default `local`) chooses where receipts are stored: `local` uses `UPLOAD_DIR` (default `uploads`; in Docker a named volume so files survive restarts), `s3` uses an S3-compatible bucket and needs `S3_BUCKET`, `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (create a credential with the `storage:read` and `storage:write` scopes in Neon; read alone or write alone is not enough). Tests use the local driver. Scripts and tests run with `NODE_ENV=test` read `.env.test` instead (the Neon `test` branch).
+2. `docker compose up --build` (see "Run with Docker" below)
+
+## Run with Docker
+
+The backend ships as an image built from `backend/Dockerfile` (multi-stage, runs as the unprivileged `node` user). The database is Neon, so there is no database container.
+
+```
+docker compose up --build            # API on http://localhost:4000
+API_PORT=4001 docker compose up      # use another host port if 4000 is taken
+```
+
+- On every start the container runs `prisma migrate deploy` (applies only migrations not yet applied, never seeds) and then starts the API. A failed migration stops the start.
+- **First run on an empty database:** the container creates the tables, but users come from the seed, which is not run by the container. Run `npx prisma db seed` from `backend/` once (dev/test branches only; it refuses to run in production).
+- Settings come from `backend/.env` at run time and are never baked into the image (`.dockerignore` keeps `.env*` out of the build).
+- The container reports `healthy` in `docker compose ps` once `/health` answers.
+- The `receipts` named volume is mounted at `/app/uploads` and is used only with `STORAGE_DRIVER=local`. With `s3` it stays empty.
+- `docker compose down` removes the container and keeps the volume; `docker compose down -v` also deletes the volume.
 
 Seeded logins, how to run tests, the finance export date definition and the full API reference will be added later.
 
