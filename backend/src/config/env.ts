@@ -23,6 +23,12 @@ const envSchema = z.object({
   // Password given to every seeded user. Only the seed script needs it, so it is optional here
   // (the app must still boot in production, where it is not set).
   SEED_PASSWORD: z.string().min(8, "SEED_PASSWORD must be at least 8 characters").optional(),
+  // Browser origins allowed to call the API in production, comma separated (e.g. https://app.example.com).
+  // Unset or blank gives an empty list. Only production reads it; dev and tests stay open.
+  CORS_ORIGIN: z
+    .string()
+    .default("")
+    .transform((value) => value.split(",").map((origin) => origin.trim()).filter((origin) => origin.length > 0)),
   // Folder for uploaded receipts (a Docker volume in containers). Resolved to an absolute path.
   UPLOAD_DIR: z
     .string()
