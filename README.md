@@ -83,7 +83,7 @@ Each user has one role. Approvers also have an `approvalLevel` (1 or 2).
 backend/    Express API, Prisma schema, tests
 frontend/   Vue 3 app
 docker-compose.yml
-.env.example
+.github/workflows/ci.yml   CI (type-check and tests on pull requests)
 STEPS.md    Build plan
 ```
 
@@ -108,7 +108,53 @@ API_PORT=4001 docker compose up      # use another host port if 4000 is taken
 - The `receipts` named volume is mounted at `/app/uploads` and is used only with `STORAGE_DRIVER=local`. With `s3` it stays empty.
 - `docker compose down` removes the container and keeps the volume; `docker compose down -v` also deletes the volume.
 
-Seeded logins, how to run tests, the finance export date definition and the full API reference will be added later.
+## Running tests
+
+Vitest + Supertest against the Neon `test` branch (never dev or production). Needs Node 20+ (Node 24 is used in CI and Docker) and a `backend/.env.test` with the test branch settings.
+
+```
+cd backend
+npm test
+```
+
+- `NODE_ENV=test` is set by the Vitest config, so `.env.test` is read instead of `.env`.
+- A guard in `tests/globalSetup.ts` refuses to run unless the database looks like the test branch, so a wrong connection string fails before any test touches data.
+- Every query is a round trip to Neon: about 6 minutes from a laptop, about 1 minute in CI.
+
+## CI and deployment
+
+```
+pull request into dev/main --> GitHub Actions: npm ci, prisma generate, tsc --noEmit, npm test
+merge into main            --> Render builds backend/Dockerfile and deploys it
+container start            --> prisma migrate deploy, then the API
+```
+
+- **CI** (`.github/workflows/ci.yml`) runs on every pull request into `dev` or `main`. The tests use the Neon `test` branch through the repository secrets `TEST_DATABASE_URL_POOLED`, `TEST_JWT_SECRET` and `TEST_SEED_PASSWORD`.
+- **Hosting:** Render web service (free tier) built from `backend/Dockerfile`, root directory `backend`, branch `main`, health check `/health`. Live API: https://expense-claims-and-reimbursement.onrender.com
+- **Production settings** are entered in Render's environment settings, never in a file: `DATABASE_URL`, `DATABASE_URL_POOLED`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `STORAGE_DRIVER=s3`, `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET`, and `CORS_ORIGIN` once the frontend has a URL. `NODE_ENV=production` is set in the image and Render sets `PORT`.
+- **Databases:** separate Neon branches per environment. `production` (the default branch) for the live app, `dev` for local work, `test` for the tests. The production bucket is private and has its own credential.
+- **Migrations** run on every container start (`prisma migrate deploy`), so a merged migration reaches production with the next deploy.
+- **Free tier caveat:** the service sleeps after 15 minutes without traffic; the first request after that takes about a minute.
+
+### One-time production seed
+
+The container never seeds. The demo users are added once from a laptop, writing straight to the production branch. The seed refuses to run with `NODE_ENV=production`, and on a laptop `NODE_ENV` is not set, so the database it writes to is decided only by the connection string given. Run from `backend/`, **one line at a time** (pasting several lines at once feeds the later lines into the hidden prompts):
+
+```
+read -rs -p "PRODUCTION pooled URL: " DATABASE_URL_POOLED; echo
+read -rs -p "Seed password: " SEED_PASSWORD; echo
+export DATABASE_URL_POOLED SEED_PASSWORD JWT_SECRET="seed-only-not-used-by-the-seed-1234"
+npx tsx prisma/seed.ts
+unset DATABASE_URL_POOLED SEED_PASSWORD JWT_SECRET
+```
+
+The seed upserts by email, so running it again changes nothing. `JWT_SECRET` is only there because the settings are validated on import; the seed does not use it.
+
+### Postman
+
+The collection in `backend/postman/` has two environments: `Expense Claims - local` (`http://localhost:4000`) and `Expense Claims - production` (the Render URL). Set `password` in the environment you use; it is never committed. `baseUrl` must not end with `/`: `//auth/login` does not match the public login route and returns 401 `UNAUTHENTICATED`.
+
+Seeded logins, the finance export date definition and the full API reference will be added later.
 
 ## Out of scope
 

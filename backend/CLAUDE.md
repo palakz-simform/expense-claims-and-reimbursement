@@ -11,7 +11,7 @@ Run commands from `backend/`.
 ## Environment and database
 - `DATABASE_URL`: **direct** Neon connection (no `-pooler`). Read only by the Prisma CLI in `prisma.config.ts` (migrations).
 - `DATABASE_URL_POOLED`: **pooled** connection (`-pooler`). Used by the running app through `@prisma/adapter-pg`.
-- `backend/.env` = dev (default branch). `backend/.env.test` = `test` branch, same variable names. Load `.env.test` explicitly when `NODE_ENV=test`.
+- `backend/.env` = the Neon `dev` branch. `backend/.env.test` = the `test` branch, same variable names. Load `.env.test` explicitly when `NODE_ENV=test`. Production (the Neon `production` branch, which is the default branch) is configured only in Render's environment settings, never in a file.
 - All env access goes through `src/config/env.ts` (Zod-validated, crashes on boot if invalid). Never read `process.env` elsewhere.
 - Prisma 7: URL lives in `prisma.config.ts`, not in `schema.prisma`; a driver adapter is required when constructing `PrismaClient`; the client is generated to `src/generated/prisma` (gitignored; import from there, not `@prisma/client`). Verify the exact generator, adapter, import paths and `prisma.config.ts` options against the current Prisma 7 docs before implementing.
 - Dependencies: anything imported at runtime (including `dotenv`) goes in `dependencies`; CLI/build/type packages go in `devDependencies`.
