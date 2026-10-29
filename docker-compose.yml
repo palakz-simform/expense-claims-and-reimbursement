@@ -1,0 +1,27 @@
+# Local stack. The database is Neon (hosted), so there is no database container.
+# The frontend service is added in Phase 19.
+services:
+  backend:
+    # Build the image from backend/Dockerfile
+    build: ./backend
+    image: expense-claims-api
+    # Settings and secrets come from backend/.env at run time (never baked into the image)
+    env_file: ./backend/.env
+    environment:
+      NODE_ENV: production
+      # Fixed inside the container; the host side of `ports` is what you change
+      PORT: "4000"
+      # Local-driver receipts live on the named volume below (ignored when STORAGE_DRIVER=s3)
+      UPLOAD_DIR: /app/uploads
+    # host:container. The host port defaults to 4000; override it when 4000 is taken,
+    # e.g. `API_PORT=4001 docker compose up`
+    ports:
+      - "${API_PORT:-4000}:4000"
+    volumes:
+      - receipts:/app/uploads
+    # Restart after a crash or a reboot, but not after `docker compose stop`
+    restart: unless-stopped
+
+# Named volume managed by Docker; survives `docker compose down` (use `down -v` to delete it)
+volumes:
+  receipts:
