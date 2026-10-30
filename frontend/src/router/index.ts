@@ -56,6 +56,13 @@ const router = createRouter({
           component: () => import('@/views/approver/ApprovalQueueView.vue'),
           meta: { roles: ['APPROVER'] },
         },
+        // Not under /approvals: the nav highlights by path prefix, so both links would light up
+        {
+          path: 'reviewed',
+          name: 'reviewed',
+          component: () => import('@/views/approver/ReviewedClaimsView.vue'),
+          meta: { roles: ['APPROVER'] },
+        },
         {
           path: 'finance',
           name: 'finance',

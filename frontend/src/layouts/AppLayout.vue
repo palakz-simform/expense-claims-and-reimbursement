@@ -3,6 +3,7 @@ import { computed, type Component } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   ArrowRightStartOnRectangleIcon,
+  ClipboardDocumentCheckIcon,
   DocumentTextIcon,
   InboxStackIcon,
   ReceiptPercentIcon,
@@ -19,7 +20,10 @@ type NavLink = { to: string; label: string; icon: Component }
 // Navigation per role (hiding links is convenience; the backend enforces access)
 const NAV_BY_ROLE: Record<Role, NavLink[]> = {
   CLAIMANT: [{ to: '/claims', label: 'My claims', icon: DocumentTextIcon }],
-  APPROVER: [{ to: '/approvals', label: 'Approval queue', icon: InboxStackIcon }],
+  APPROVER: [
+    { to: '/approvals', label: 'Approval queue', icon: InboxStackIcon },
+    { to: '/reviewed', label: 'Reviewed', icon: ClipboardDocumentCheckIcon },
+  ],
   FINANCE: [{ to: '/finance', label: 'Approved claims', icon: TableCellsIcon }],
 }
 

@@ -58,8 +58,8 @@ The backend is finished, deployed on Render (https://expense-claims-and-reimburs
 | F6 | DONE | `feat: add claimant claim list and create claim` |
 | F7 | DONE | `feat: add claim editor with line items and receipts` |
 | F8 | DONE | `feat: add claim detail page with status and history` |
-| F9 | Next | `feat: add approver queue and approve/reject` |
-| F10 | | `feat: add finance claims table and CSV export` |
+| F9 | DONE | `feat: add approver queue and approve/reject` |
+| F10 | Next | `feat: add finance claims table and CSV export` |
 | F11 | | `chore: add frontend Dockerfile and compose service` |
 | F12 | | `chore: deploy frontend as Render static site` |
 | F13 | | `docs: document frontend setup and deployment` |

@@ -116,3 +116,28 @@ export type Paginated<T> = {
     totalPages: number
   }
 }
+
+// GET /approvals rows: one approval step waiting for this approver's decision
+export type ApprovalQueueItem = {
+  id: string
+  level: number
+  status: ApprovalStatus
+  claim: {
+    id: string
+    claimNumber: number
+    title: string
+    total: string
+    submittedAt: string
+    claimantName: string
+  }
+}
+
+// POST /approvals/:id/approve and /reject: the decided step and the claim's new status
+export type ApprovalDecision = {
+  id: string
+  level: number
+  status: ApprovalStatus
+  decidedAt: string
+  reason?: string
+  claim: { id: string; status: ClaimStatus; approvedAt?: string | null }
+}
