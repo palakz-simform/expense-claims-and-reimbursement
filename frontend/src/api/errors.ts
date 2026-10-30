@@ -25,3 +25,18 @@ export class ApiError extends Error {
     this.details = details
   }
 }
+
+// Field errors of a 400 VALIDATION_ERROR as { amount: 'Amount must be…' } (body fields only)
+export function fieldErrorsOf(error: unknown): Record<string, string> {
+  const fieldErrors: Record<string, string> = {}
+  if (!(error instanceof ApiError) || !Array.isArray(error.details)) {
+    return fieldErrors
+  }
+  for (const detail of error.details) {
+    const isBodyField = detail?.in === 'body' && typeof detail.path === 'string'
+    if (isBodyField && !fieldErrors[detail.path]) {
+      fieldErrors[detail.path] = String(detail.message)
+    }
+  }
+  return fieldErrors
+}
