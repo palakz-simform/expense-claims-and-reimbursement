@@ -24,6 +24,65 @@ export type LoginResponse = {
   user: User
 }
 
+// A receipt file attached to a line item (the stored file name is never sent)
+export type Receipt = {
+  id: string
+  lineItemId: string
+  originalName: string
+  mimeType: string
+  sizeBytes: number
+  uploadedAt: string
+}
+
+// One expense line. date is a calendar date "YYYY-MM-DD"; amount is a decimal string like "125.50"
+export type LineItem = {
+  id: string
+  date: string
+  category: Category
+  amount: string
+  description: string
+  receipts: Receipt[]
+}
+
+// Fields shared by the list and detail shapes. total is computed by the API, never by the client
+type ClaimBase = {
+  id: string
+  claimNumber: number
+  title: string
+  status: ClaimStatus
+  total: string
+  submittedAt: string | null
+  approvedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+// GET /claims rows
+export type ClaimSummary = ClaimBase & { lineItemCount: number }
+
+// One step of the live approval chain
+export type ApprovalStep = {
+  level: number
+  status: ApprovalStatus
+  approverName: string
+  decidedAt: string | null
+}
+
+// The latest rejection, shown so the claimant knows what to fix
+export type LastRejection = {
+  reason: string
+  level: number
+  rejectedAt: string
+  rejectedBy: string
+}
+
+// GET /claims/:id (and the write endpoints, which may omit the last two fields)
+export type ClaimDetail = ClaimBase & {
+  lineItems: LineItem[]
+  lastRejection?: LastRejection | null
+  approvals?: ApprovalStep[]
+}
+
 // Every list endpoint: { data, pagination }
 export type Paginated<T> = {
   data: T[]

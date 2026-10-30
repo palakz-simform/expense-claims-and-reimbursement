@@ -55,8 +55,8 @@ The backend is finished, deployed on Render (https://expense-claims-and-reimburs
 | F3 | DONE | `feat: add login page, auth store and app layout` |
 | F4 | DONE | `feat: add role-based route guards` |
 | F5 | DONE | `feat: add shared UI components and formatters` |
-| F6 | Next | `feat: add claimant claim list and create claim` |
-| F7 | | `feat: add claim editor with line items and receipts` |
+| F6 | DONE | `feat: add claimant claim list and create claim` |
+| F7 | Next | `feat: add claim editor with line items and receipts` |
 | F8 | | `feat: add claim detail page with status and history` |
 | F9 | | `feat: add approver queue and approve/reject` |
 | F10 | | `feat: add finance claims table and CSV export` |

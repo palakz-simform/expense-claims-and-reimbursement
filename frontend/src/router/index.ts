@@ -34,6 +34,22 @@ const router = createRouter({
           component: () => import('@/views/claimant/ClaimsListView.vue'),
           meta: { roles: ['CLAIMANT'] },
         },
+        // props: true passes the :id param to the page as a prop
+        {
+          path: 'claims/:id/edit',
+          name: 'claim-edit',
+          component: () => import('@/views/claimant/ClaimEditorView.vue'),
+          props: true,
+          meta: { roles: ['CLAIMANT'] },
+        },
+        // Read-only claim page for every role (the API decides which claims each user may see)
+        {
+          path: 'claims/:id',
+          name: 'claim-detail',
+          component: () => import('@/views/claims/ClaimDetailView.vue'),
+          props: true,
+          meta: { roles: ['CLAIMANT', 'APPROVER', 'FINANCE'] },
+        },
         {
           path: 'approvals',
           name: 'approvals',
