@@ -54,8 +54,8 @@ The backend is finished, deployed on Render (https://expense-claims-and-reimburs
 | F2 | DONE | `feat: add axios API client with JWT interceptor` |
 | F3 | DONE | `feat: add login page, auth store and app layout` |
 | F4 | DONE | `feat: add role-based route guards` |
-| F5 | Next | `feat: add shared UI components and formatters` |
-| F6 | | `feat: add claimant claim list and create claim` |
+| F5 | DONE | `feat: add shared UI components and formatters` |
+| F6 | Next | `feat: add claimant claim list and create claim` |
 | F7 | | `feat: add claim editor with line items and receipts` |
 | F8 | | `feat: add claim detail page with status and history` |
 | F9 | | `feat: add approver queue and approve/reject` |
@@ -106,7 +106,7 @@ The backend is finished, deployed on Render (https://expense-claims-and-reimburs
 **F5: shared pieces**
 - Components: `BaseButton`, `StatusBadge`, `PaginationBar`, `EmptyState`, `ErrorAlert`, `PageHeader`.
 - `src/utils/format.ts`: money, and dates in UTC.
-- A blob-download helper that takes the filename from `Content-Disposition`.
+- A blob-download helper (`saveBlob`). The filename comes from the frontend (receipt `originalName`, `approved-claims_<from>_<to>.csv`), because the browser hides `Content-Disposition` on cross-origin responses unless CORS exposes it.
 
 **F6: claimant list**
 - `src/api/claims.ts`.
