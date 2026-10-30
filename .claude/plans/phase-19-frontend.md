@@ -51,7 +51,7 @@ The backend is finished, deployed on Render (https://expense-claims-and-reimburs
 | # | Status | Commit |
 |---|---|---|
 | F1 | DONE (`b603e70`) | `chore: scaffold Vue 3 frontend with Tailwind` |
-| F2 | Written, awaiting commit | `feat: add axios API client with JWT interceptor` |
+| F2 | DONE | `feat: add axios API client with JWT interceptor` |
 | F3 | Next | `feat: add login page, auth store and app layout` |
 | F4 | | `feat: add role-based route guards` |
 | F5 | | `feat: add shared UI components and formatters` |
