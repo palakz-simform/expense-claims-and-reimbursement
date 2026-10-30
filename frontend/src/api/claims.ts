@@ -1,5 +1,12 @@
 import { http } from './http'
-import type { Category, ClaimDetail, ClaimStatus, ClaimSummary, Paginated } from '@/types/api'
+import type {
+  Category,
+  ClaimDetail,
+  ClaimStatus,
+  ClaimSummary,
+  HistoryEntry,
+  Paginated,
+} from '@/types/api'
 
 // GET /claims filters (from/to are inclusive YYYY-MM-DD on submittedAt)
 export type ClaimListQuery = {
@@ -19,6 +26,13 @@ export async function listClaims(query: ClaimListQuery): Promise<Paginated<Claim
 // GET /claims/:id
 export async function getClaim(id: string): Promise<ClaimDetail> {
   const response = await http.get<ClaimDetail>(`/claims/${id}`)
+  return response.data
+}
+
+// GET /claims/:id/history: the audit trail, oldest first (pageSize max 100)
+export async function getClaimHistory(id: string, page = 1): Promise<Paginated<HistoryEntry>> {
+  const params = { page, pageSize: 100 }
+  const response = await http.get<Paginated<HistoryEntry>>(`/claims/${id}/history`, { params })
   return response.data
 }
 

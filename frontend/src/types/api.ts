@@ -83,6 +83,29 @@ export type ClaimDetail = ClaimBase & {
   approvals?: ApprovalStep[]
 }
 
+// Audit actions (backend AuditAction enum)
+export type AuditAction =
+  | 'CLAIM_CREATED'
+  | 'CLAIM_UPDATED'
+  | 'CLAIM_SUBMITTED'
+  | 'APPROVAL_GRANTED'
+  | 'CLAIM_APPROVED'
+  | 'CLAIM_REJECTED'
+  | 'CLAIM_RESUBMITTED'
+  | 'APPROVAL_CHAIN_RESET'
+  | 'RECEIPT_ADDED'
+  | 'RECEIPT_REMOVED'
+
+// GET /claims/:id/history rows (oldest first); metadata differs per action
+export type HistoryEntry = {
+  id: string
+  action: AuditAction
+  reason: string | null
+  metadata: Record<string, unknown> | null
+  createdAt: string
+  performedBy: { name: string; role: Role }
+}
+
 // Every list endpoint: { data, pagination }
 export type Paginated<T> = {
   data: T[]
