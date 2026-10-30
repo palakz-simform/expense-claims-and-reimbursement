@@ -16,6 +16,9 @@ const submitting = ref(false)
 const slowServer = ref(false)
 const errorMessage = ref('')
 
+// Set by main.ts when a 401 signs the user out mid-use
+const sessionExpired = route.query.expired === '1'
+
 // Seeded demo accounts (passwords are never shown)
 const demoAccounts = [
   { email: 'asha.claimant@example.com', label: 'Asha · Claimant' },
@@ -78,6 +81,14 @@ async function onSubmit(): Promise<void> {
         class="space-y-4 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-8"
         @submit.prevent="onSubmit"
       >
+        <div
+          v-if="sessionExpired && !errorMessage"
+          class="rounded-lg bg-amber-50 p-3 text-sm text-amber-800"
+          role="status"
+        >
+          Your session has expired. Please sign in again.
+        </div>
+
         <div
           v-if="errorMessage"
           class="flex items-start gap-2 rounded-lg bg-red-50 p-3 text-sm text-red-700"
