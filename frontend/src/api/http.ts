@@ -32,10 +32,23 @@ type ErrorBody = {
   error?: { code?: string; message?: string; details?: unknown; requestId?: string }
 }
 
+// Blob downloads get their JSON error body as a Blob too: read it back
+async function readErrorBody(data: unknown): Promise<ErrorBody | undefined> {
+  if (!(data instanceof Blob)) {
+    return data as ErrorBody | undefined
+  }
+  try {
+    const text = await data.text()
+    return JSON.parse(text) as ErrorBody
+  } catch {
+    return undefined
+  }
+}
+
 // Turn every failure into an ApiError
 http.interceptors.response.use(
   (response) => response,
-  (error: unknown) => {
+  async (error: unknown) => {
     // Not from axios: pass through
     if (!axios.isAxiosError<ErrorBody>(error)) {
       return Promise.reject(error)
@@ -53,7 +66,8 @@ http.interceptors.response.use(
 
     // Server error: copy its code and message
     const status = error.response.status
-    const body = error.response.data?.error
+    const errorBody = await readErrorBody(error.response.data)
+    const body = errorBody?.error
     const code = body?.code ?? 'UNKNOWN_ERROR'
     const message = body?.message ?? error.message
     const apiError = new ApiError(status, code, message, body?.requestId, body?.details)

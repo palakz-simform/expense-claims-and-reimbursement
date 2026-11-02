@@ -48,3 +48,9 @@ export function enumLabel(value: string): string {
 export function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10)
 }
+
+// First day of the current month as "YYYY-MM-DD" in UTC (default start of a period)
+export function monthStartIsoDate(): string {
+  const today = todayIsoDate()
+  return `${today.slice(0, 7)}-01`
+}
