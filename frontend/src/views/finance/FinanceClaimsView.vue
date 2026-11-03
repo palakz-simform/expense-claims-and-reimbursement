@@ -98,6 +98,12 @@ function selectStatus(value: StatusFilter): void {
 const fromDraft = ref(submittedFrom.value ?? '')
 const toDraft = ref(submittedTo.value ?? '')
 
+// Keep the inputs in step when the URL changes without "Apply" (e.g. the nav link drops the filters)
+watch([submittedFrom, submittedTo], ([from, to]) => {
+  fromDraft.value = from ?? ''
+  toDraft.value = to ?? ''
+})
+
 function applyDates(): void {
   const query = {
     ...route.query,

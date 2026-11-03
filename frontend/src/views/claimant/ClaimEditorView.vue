@@ -144,12 +144,27 @@ async function onSaveItem(itemId: string, values: LineItemInput): Promise<void> 
   }
 }
 
-async function onDeleteItem(itemId: string): Promise<void> {
-  deletingItemId.value = itemId
+// Deleting an item is permanent and, on a pending claim, restarts approval: ask first
+const itemToDelete = ref<LineItem | null>(null)
+const deleteItemOpen = ref(false)
+
+function confirmDeleteItem(item: LineItem): void {
+  itemToDelete.value = item
+  deleteItemError.value = null
+  deleteItemOpen.value = true
+}
+
+async function onDeleteItem(): Promise<void> {
+  const item = itemToDelete.value
+  if (!item) {
+    return
+  }
+  deletingItemId.value = item.id
   deleteItemError.value = null
   try {
-    const updated = await deleteLineItem(id, itemId)
+    const updated = await deleteLineItem(id, item.id)
     applyClaim(updated)
+    deleteItemOpen.value = false
   } catch (error) {
     // e.g. NO_LINE_ITEMS when removing the last item of a pending claim
     deleteItemError.value = error
@@ -283,8 +298,6 @@ watch(() => id, loadClaim, { immediate: true })
           </BaseButton>
         </div>
 
-        <ErrorAlert :error="deleteItemError" class="mx-5 mt-4" />
-
         <p
           v-if="claim.lineItems.length === 0 && !addingItem"
           class="px-5 py-10 text-center text-sm text-slate-500"
@@ -328,7 +341,7 @@ watch(() => id, loadClaim, { immediate: true })
                     :disabled="deletingItemId === item.id"
                     class="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
                     aria-label="Delete item"
-                    @click="onDeleteItem(item.id)"
+                    @click="confirmDeleteItem(item)"
                   >
                     <TrashIcon class="size-4" />
                   </button>
@@ -391,6 +404,24 @@ watch(() => id, loadClaim, { immediate: true })
       </section>
     </aside>
   </div>
+
+  <!-- Delete line item confirmation -->
+  <BaseModal v-model:open="deleteItemOpen" title="Delete this item?">
+    <p class="text-sm text-slate-600">
+      <span class="font-medium text-slate-900">{{ itemToDelete?.description }}</span>
+      and its receipts are removed permanently.
+    </p>
+    <p v-if="isPending" class="mt-2 text-sm text-amber-700">
+      The total changes, so approval restarts from level 1.
+    </p>
+    <ErrorAlert :error="deleteItemError" class="mt-4" />
+    <div class="mt-6 flex justify-end gap-2">
+      <BaseButton variant="secondary" @click="deleteItemOpen = false">Cancel</BaseButton>
+      <BaseButton variant="danger" :loading="deletingItemId !== null" @click="onDeleteItem">
+        Delete item
+      </BaseButton>
+    </div>
+  </BaseModal>
 
   <!-- Delete draft confirmation -->
   <BaseModal v-model:open="deleteOpen" title="Delete this draft?">
