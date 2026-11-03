@@ -60,8 +60,8 @@ The backend is finished, deployed on Render (https://expense-claims-and-reimburs
 | F8 | DONE | `feat: add claim detail page with status and history` |
 | F9 | DONE | `feat: add approver queue and approve/reject` |
 | F10 | DONE | `feat: add finance claims table and CSV export` |
-| F11 | Next | `chore: add frontend Dockerfile and compose service` |
-| F12 | | `chore: deploy frontend as Render static site` |
+| F11 | DONE | `chore: add frontend Dockerfile and compose service` |
+| F12 | Next | `chore: deploy frontend as Render static site` |
 | F13 | | `docs: document frontend setup and deployment` |
 
 ### What each sub-phase contains
