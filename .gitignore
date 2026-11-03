@@ -14,6 +14,16 @@ backend/src/generated/
 .env.*
 !.env.example
 
+# Frontend tooling caches and local overrides (Vite *.local files, TS build info, ESLint cache)
+*.local
+*.tsbuildinfo
+.eslintcache
+coverage/
+
+# Editor settings: share only the recommended-extensions list
+frontend/.vscode/*
+!frontend/.vscode/extensions.json
+
 # Uploaded receipts
 uploads/
 

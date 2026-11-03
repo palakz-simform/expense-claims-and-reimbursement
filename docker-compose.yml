@@ -1,5 +1,4 @@
-# Local stack. The database is Neon (hosted), so there is no database container.
-# The frontend service is added in Phase 19.
+# Local stack: the API and the web app. The database is Neon (hosted), so there is no database container.
 services:
   backend:
     # Build the image from backend/Dockerfile
@@ -13,6 +12,9 @@ services:
       PORT: "4000"
       # Local-driver receipts live on the named volume below (ignored when STORAGE_DRIVER=s3)
       UPLOAD_DIR: /app/uploads
+      # Production mode only accepts listed browser origins: allow the frontend container below.
+      # Overrides any CORS_ORIGIN in backend/.env for this local stack only.
+      CORS_ORIGIN: "http://localhost:${WEB_PORT:-8080}"
     # host:container. The host port defaults to 4000; override it when 4000 is taken,
     # e.g. `API_PORT=4001 docker compose up`
     ports:
@@ -20,6 +22,22 @@ services:
     volumes:
       - receipts:/app/uploads
     # Restart after a crash or a reboot, but not after `docker compose stop`
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # The URL the BROWSER uses to reach the API (baked in at build time, so a change needs a rebuild).
+        # Keep it in step with API_PORT, e.g. `API_PORT=4001 VITE_API_URL=http://localhost:4001 docker compose up --build`
+        VITE_API_URL: "${VITE_API_URL:-http://localhost:4000}"
+    image: expense-claims-web
+    # nginx inside listens on 8080 (non-root); override the host side with WEB_PORT
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    # Start after the API; the browser, not this container, makes the API calls
+    depends_on:
+      - backend
     restart: unless-stopped
 
 # Named volume managed by Docker; survives `docker compose down` (use `down -v` to delete it)

@@ -8,11 +8,11 @@ The focus is backend correctness: data integrity, authorization, approval workfl
 
 ## Stack
 
-- Frontend: Vue 3
+- Frontend: Vue 3 (Vite, TypeScript, Pinia, Vue Router), Tailwind CSS, axios, Heroicons
 - Backend: Node.js, Express, TypeScript
 - ORM / DB: Prisma, PostgreSQL (hosted on Neon)
 - Auth: JWT issued by the Express backend, bcrypt password hashing
-- Files: Multer, stored on a Docker volume (metadata in PostgreSQL)
+- Files: Multer, then local disk (a Docker volume) or a private S3-compatible bucket (metadata in PostgreSQL)
 - Containers: Docker + Docker Compose (frontend and backend; no database container)
 
 ## Roles
@@ -90,15 +90,17 @@ STEPS.md    Build plan
 ## Setup (to be completed)
 
 1. Copy `backend/.env.example` to `backend/.env` and fill in the values (Neon `DATABASE_URL` (direct) and `DATABASE_URL_POOLED`, `JWT_SECRET`, etc.). Write values without quotes: `docker run --env-file` keeps quotes as part of the value. `STORAGE_DRIVER` (default `local`) chooses where receipts are stored: `local` uses `UPLOAD_DIR` (default `uploads`; in Docker a named volume so files survive restarts), `s3` uses an S3-compatible bucket and needs `S3_BUCKET`, `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (create a credential with the `storage:read` and `storage:write` scopes in Neon; read alone or write alone is not enough). Tests use the local driver. Scripts and tests run with `NODE_ENV=test` read `.env.test` instead (the Neon `test` branch).
-2. `docker compose up --build` (see "Run with Docker" below)
+2. For running the frontend outside Docker: copy `frontend/.env.example` to `frontend/.env` and set `VITE_API_URL=http://localhost:4000` (no quotes, no trailing slash). Docker does not need this file.
+3. `docker compose up --build` (see "Run with Docker" below)
 
 ## Run with Docker
 
-The backend ships as an image built from `backend/Dockerfile` (multi-stage, runs as the unprivileged `node` user). The database is Neon, so there is no database container.
+Two services. The backend image is built from `backend/Dockerfile` (multi-stage, runs as the unprivileged `node` user); the frontend image from `frontend/Dockerfile` (Vite build, then unprivileged nginx serving the static files). The database is Neon, so there is no database container.
 
 ```
-docker compose up --build            # API on http://localhost:4000
-API_PORT=4001 docker compose up      # use another host port if 4000 is taken
+docker compose up --build                       # web on http://localhost:8080, API on http://localhost:4000
+API_PORT=4001 VITE_API_URL=http://localhost:4001 docker compose up --build   # API on another host port
+WEB_PORT=8081 docker compose up --build         # web on another host port if 8080 is taken
 ```
 
 - On every start the container runs `prisma migrate deploy` (applies only migrations not yet applied, never seeds) and then starts the API. A failed migration stops the start.
@@ -107,6 +109,37 @@ API_PORT=4001 docker compose up      # use another host port if 4000 is taken
 - The container reports `healthy` in `docker compose ps` once `/health` answers.
 - The `receipts` named volume is mounted at `/app/uploads` and is used only with `STORAGE_DRIVER=local`. With `s3` it stays empty.
 - `docker compose down` removes the container and keeps the volume; `docker compose down -v` also deletes the volume.
+- **Frontend:** `VITE_API_URL` is the URL the *browser* uses to reach the API. Vite writes it into the JS bundle at build time, so it is a build argument (default `http://localhost:4000`) and a change needs `--build`; the build fails if it is empty.
+- The compose backend runs with `NODE_ENV=production`, so CORS allows only `CORS_ORIGIN`. Compose sets it to `http://localhost:${WEB_PORT}` for this local stack (overriding `backend/.env`), so the web container can call the API.
+- nginx serves `index.html` for any unknown path (SPA fallback, so a refresh on `/claims/123` works), caches the hashed `/assets/*` files for a year and `index.html` never, and adds `X-Frame-Options`, `X-Content-Type-Options` and `Referrer-Policy`. The frontend container is `healthy` once nginx serves `index.html`.
+
+## Frontend
+
+A deliberately small Vue 3 client; every rule lives in the API.
+
+```
+cd frontend
+npm install
+npm run dev          # http://localhost:5173 (needs frontend/.env and the API on :4000)
+npm run type-check   # vue-tsc
+npm run lint         # oxlint + eslint
+npm run build        # type-check + production build into dist/
+```
+
+| Role | Pages |
+|---|---|
+| CLAIMANT | My claims (status tabs), claim editor (line items, receipts, submit / resubmit, delete draft), claim detail |
+| APPROVER | Approval queue (approve, reject with reason), Reviewed (every claim that reached them), claim detail |
+| FINANCE | Approved claims (status and submitted-date filters), CSV export by approval date, claim detail |
+
+- **Layout:** `src/api/` (one axios instance and one module per resource), `src/stores/auth.ts` (Pinia), `src/router/` (routes and the role guard), `src/views/` per role, `src/components/` (shared UI), `src/utils/` (money and date formatting, downloads), `src/types/api.ts` (response shapes).
+- **Auth:** the JWT from `POST /auth/login` is kept in `sessionStorage` (gone when the tab closes) and sent as `Authorization: Bearer` by an axios interceptor. On page load the session is restored once with `GET /auth/me`. Any `401` (except on login) clears the token and returns to the login page with "session expired".
+- **The UI is a convenience, not security.** Route guards and hidden buttons only keep users away from pages they cannot use. Editing the role in the browser, changing the token or calling the API directly is still refused by the backend (`401`, `403`, or `404` for claims outside the user's scope).
+- **Errors:** every failure becomes an `ApiError` with the backend's `code`, `message` and `requestId` (shown as "Reference" so a log line can be found). The UI decides on `code`, never on message text. `400 VALIDATION_ERROR` details are shown under the matching form field. No response at all is `NETWORK_ERROR`.
+- **Money and totals:** amounts stay the API's decimal strings (`"125.50"`) and are only formatted (`Intl`, INR). The claim total shown is always the one the API returned; the client never adds amounts up.
+- **Dates:** calendar dates (`YYYY-MM-DD`) are formatted in UTC so they never shift a day in a browser west of UTC.
+- **Filters live in the URL** (`?status=&page=&from=&to=`), so refresh, back and shared links keep them. A slower older response never overwrites a newer one.
+- **Downloads** (receipts, the CSV) need the Bearer header, so they are fetched as blobs and saved through a temporary object URL. The file name comes from the client because CORS hides `Content-Disposition`.
 
 ## Running tests
 
@@ -126,6 +159,7 @@ npm test
 ```
 pull request into dev/main --> GitHub Actions: npm ci, prisma generate, tsc --noEmit, npm test
 merge into main            --> Render builds backend/Dockerfile and deploys it
+                               Render builds frontend/ as a static site and deploys it
 container start            --> prisma migrate deploy, then the API
 ```
 
@@ -135,6 +169,18 @@ container start            --> prisma migrate deploy, then the API
 - **Databases:** separate Neon branches per environment. `production` (the default branch) for the live app, `dev` for local work, `test` for the tests. The production bucket is private and has its own credential.
 - **Migrations** run on every container start (`prisma migrate deploy`), so a merged migration reaches production with the next deploy.
 - **Free tier caveat:** the service sleeps after 15 minutes without traffic; the first request after that takes about a minute.
+- **Frontend hosting:** Render Static Site (CDN, no server and no nginx), set up in the dashboard:
+
+  | Setting | Value |
+  |---|---|
+  | Branch / root directory | `main` / `frontend` |
+  | Build command | `npm ci && npm run build` |
+  | Publish directory | `dist` |
+  | Environment | `VITE_API_URL` = the API URL, no trailing slash (not a secret: it ends up in the bundle) |
+  | Redirects/Rewrites | `/*` to `/index.html`, action **Rewrite** (SPA fallback; real files such as `/assets/*` are served first) |
+  | Headers | `/*`: `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`; `/assets/*`: `Cache-Control: public, max-age=31536000, immutable` |
+
+  Then set the backend's `CORS_ORIGIN` to the site's exact URL (no trailing slash); saving it redeploys the API. Check: log in, refresh on a claim page (the rewrite), and no CORS errors in the browser console.
 
 ### One-time production seed
 
