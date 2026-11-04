@@ -9,7 +9,7 @@ Detailed backend rules live in `backend/CLAUDE.md`. Domain rules (roles, status 
 - Backend: Node.js, Express 5, TypeScript (strict), Zod, Prisma 7 with the `pg` driver adapter
 - Database: PostgreSQL on Neon: `production` (the default branch, used by the live app), `dev` (local work) and `test` (tests), with `dev` and `test` as children of `production`
 - Auth: JWT issued by the backend, bcrypt password hashing
-- Files: Multer upload, then a storage interface: local disk (`STORAGE_DRIVER=local`, a Docker volume in Compose) or a private S3-compatible bucket (`s3`, Neon Object Storage; used in production). Metadata in Postgres
+- Files: Multer upload (temp folder for the type and size checks), then a private S3-compatible bucket (Neon Object Storage) behind a storage interface, one bucket per environment. Metadata in Postgres
 - Hosting: Render web service built from `backend/Dockerfile`, auto-deployed on merge to `main`; CI with GitHub Actions on pull requests
 - Frontend: Vue 3 (Vite, TS, Pinia). Deliberately minimal; the backend is the learning goal
 - Containers: Docker Compose for frontend and backend (no database container; Neon is hosted)

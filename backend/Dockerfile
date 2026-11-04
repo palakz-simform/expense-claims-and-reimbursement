@@ -39,10 +39,6 @@ COPY prisma.config.ts ./
 # Start script (migrate, then run the API); must be executable
 COPY --chmod=755 docker-entrypoint.sh ./
 
-# Receipts (STORAGE_DRIVER=local) are written here. The folder belongs to the unprivileged user.
-RUN mkdir -p /app/uploads && chown node:node /app/uploads
-ENV UPLOAD_DIR=/app/uploads
-
 # Never run as root inside the container
 USER node
 
