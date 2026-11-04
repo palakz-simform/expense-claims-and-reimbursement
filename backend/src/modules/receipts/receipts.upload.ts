@@ -7,8 +7,8 @@ import multer from "multer";
 import { AppError } from "../../lib/AppError";
 import { MAX_RECEIPT_BYTES, RECEIPT_EXTENSIONS } from "../../lib/receiptFiles";
 
-// A file lands here first (the storage driver then takes it, and the service removes this copy).
-// The temp folder is the same for every driver, so the checks below work the same everywhere.
+// A file lands here first for the type and size checks; the service then uploads it to the bucket and
+// removes this copy.
 const UPLOAD_TEMP_DIR = path.join(os.tmpdir(), "expense-claims-uploads");
 mkdirSync(UPLOAD_TEMP_DIR, { recursive: true });
 

@@ -134,12 +134,12 @@ model Receipt {
   id           String   @id @default(uuid(7)) @db.Uuid
   lineItemId   String   @db.Uuid
   originalName String // shown to the user only; never used as a file path
-  storedName   String   @unique // random name on disk
+  storedName   String   @unique // random storage key (object name in the bucket)
   mimeType     String
   sizeBytes    Int
   uploadedAt   DateTime @default(now())
 
-  // Restrict: deleting a line item that still has receipts fails, so files on disk are never orphaned silently
+  // Restrict: deleting a line item that still has receipts fails, so stored files are never orphaned silently
   lineItem LineItem @relation(fields: [lineItemId], references: [id], onDelete: Restrict)
 
   @@index([lineItemId])
