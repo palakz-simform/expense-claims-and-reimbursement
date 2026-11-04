@@ -12,7 +12,7 @@ async function lockClaimRow(tx: Prisma.TransactionClient, where: Prisma.Sql): Pr
   const rows = await tx.$queryRaw<LockedClaim[]>`
     SELECT "status", "currentApprovalVersion" FROM "Claim"
     WHERE ${where}
-    FOR UPDATE`;
+    FOR UPDATE`;  //Acquires an exclusive row-level lock on the selected row until the current transaction ends 
   const claim = rows[0];
 
   // Missing or not visible: the same 404 either way

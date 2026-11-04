@@ -24,9 +24,6 @@ coverage/
 frontend/.vscode/*
 !frontend/.vscode/extensions.json
 
-# Uploaded receipts
-uploads/
-
 # Misc
 .DS_Store
 *.log

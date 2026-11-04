@@ -4,15 +4,15 @@ Employees submit itemised expense claims with receipts. Claims route through an 
 
 The focus is backend correctness: data integrity, authorization, approval workflow, transactions and audit history. The backend is the source of truth; the frontend is only a client.
 
-> Status: work in progress. This README is the starting point and will be updated as the project is built. See [STEPS.md](STEPS.md) for the build plan.
+**Live:** app https://expense-claims-and-reimbursement-fe.onrender.com · API https://expense-claims-and-reimbursement.onrender.com (free tier: the first request after 15 idle minutes takes about a minute).
 
 ## Stack
 
 - Frontend: Vue 3 (Vite, TypeScript, Pinia, Vue Router), Tailwind CSS, axios, Heroicons
-- Backend: Node.js, Express, TypeScript
-- ORM / DB: Prisma, PostgreSQL (hosted on Neon)
+- Backend: Node.js 24, Express 5, TypeScript (strict), Zod 4 validation
+- ORM / DB: Prisma 7 with the `pg` driver adapter, PostgreSQL (hosted on Neon)
 - Auth: JWT issued by the Express backend, bcrypt password hashing
-- Files: Multer, then local disk (a Docker volume) or a private S3-compatible bucket (metadata in PostgreSQL)
+- Files: Multer, then a private S3-compatible bucket, Neon Object Storage (metadata in PostgreSQL)
 - Containers: Docker + Docker Compose (frontend and backend; no database container)
 
 ## Roles
@@ -25,18 +25,36 @@ The focus is backend correctness: data integrity, authorization, approval workfl
 
 Each user has one role. Approvers also have an `approvalLevel` (1 or 2).
 
+### Seeded logins
+
+There is no registration; users come from `backend/prisma/seed.ts`. All share one password, taken from `SEED_PASSWORD` at seed time (never committed).
+
+| Email | Role | Approves |
+|---|---|---|
+| `asha.claimant@example.com` | CLAIMANT | |
+| `bilal.claimant@example.com` | CLAIMANT | |
+| `ravi.l1@example.com` | APPROVER, level 1 | Asha |
+| `sana.l1@example.com` | APPROVER, level 1 | Bilal |
+| `meera.l2@example.com` | APPROVER, level 2 | Asha |
+| `kabir.l2@example.com` | APPROVER, level 2 | Bilal |
+| `farah.finance@example.com` | FINANCE | |
+
+The two claimants have different approvers at every level, so an approver can be shown not to see the other claimant's claims. A claim under ₹10,000 needs level 1 only; ₹10,000 or more needs level 1 and then level 2.
+
 ## Key design decisions
 
 - **Claim total is derived.** There is no stored total; it is `SUM(lineItem.amount)`, so it cannot drift from the line items. Amounts use `Decimal(12,2)`. In the API, money (`amount`, `total`) is a **string with 2 decimals** (for example `"125.50"`), never a JSON number, and clients cannot send a `total` (unknown fields are rejected with 400).
 - **Receipts are attached per line item, not per claim** (the brief allows either; this is our documented choice). A line item can have zero or more receipts; a receipt is optional and is not required to submit. Why per line item: each receipt proves one specific expense, so approvers and finance can trace an amount to its evidence, and the approved-claim lock triggers apply at the same level as the amounts they protect.
-- **Receipt rules.** `POST /line-items/:id/receipts` takes one file (PDF, PNG or JPEG, at most 5 MB) in the multipart field `file`; a line item holds at most 5 receipts (`422 RECEIPT_LIMIT_REACHED`). The client's Content-Type is not trusted: the file's first bytes are checked too (`415 UNSUPPORTED_FILE_TYPE`), and a file over the limit is `413 FILE_TOO_LARGE`. The file is saved under a random name (never the client's file name, so no path traversal) in the configured storage, and the API never returns the stored name or path; the original name is kept only to show and to name the download. Receipts can be added or deleted while the claim is a draft, awaiting approval or rejected (approved is `409 CLAIM_LOCKED`, with a database trigger as backstop), by the claimant who owns the item, with the claim row locked so the 5-receipt cap holds under concurrent uploads. A receipt does not change the total, so it never resets the approval chain, and approvals already given stay valid. On a submitted claim every add and remove is recorded in `ClaimHistory` (`RECEIPT_ADDED`, `RECEIPT_REMOVED`); a draft has no history. `GET /receipts/:id` streams the file to the claimant, approvers and finance within the same claim scope as `GET /claims/:id` (out of scope is `404`), as a private attachment. Deleting a line item or a draft deletes its receipts: the rows go in the same transaction and the files are removed only after it commits, so a failed delete never loses a file. A receipt whose file is missing from the storage downloads as `404`. **Where files live** is chosen by `STORAGE_DRIVER`: `local` (default; the `UPLOAD_DIR` folder, a Docker volume in containers) or `s3` (a private S3-compatible bucket, Neon Object Storage; used when deployed because hosts like Render wipe local disks). The bucket is never public: files are only reachable through `GET /receipts/:id`, after the claim-scope check. Every upload lands in a temp folder first for the type and size checks, is then handed to the storage, and the temp copy is always removed. Receipts are listed on each line item of a claim response (`receipts`).
+- **Receipt rules.** `POST /line-items/:id/receipts` takes one file (PDF, PNG or JPEG, at most 5 MB) in the multipart field `file`; a line item holds at most 5 receipts (`422 RECEIPT_LIMIT_REACHED`). The client's Content-Type is not trusted: the file's first bytes are checked too (`415 UNSUPPORTED_FILE_TYPE`), and a file over the limit is `413 FILE_TOO_LARGE`. The file is saved under a random name (never the client's file name, so no path traversal) in the bucket, and the API never returns the stored name or path; the original name is kept only to show and to name the download. Receipts can be added or deleted while the claim is a draft, awaiting approval or rejected (approved is `409 CLAIM_LOCKED`, with a database trigger as backstop), by the claimant who owns the item, with the claim row locked so the 5-receipt cap holds under concurrent uploads. A receipt does not change the total, so it never resets the approval chain, and approvals already given stay valid. On a submitted claim every add and remove is recorded in `ClaimHistory` (`RECEIPT_ADDED`, `RECEIPT_REMOVED`); a draft has no history. `GET /receipts/:id` streams the file to the claimant, approvers and finance within the same claim scope as `GET /claims/:id` (out of scope is `404`), as a private attachment. Deleting a line item or a draft deletes its receipts: the rows go in the same transaction and the files are removed only after it commits, so a failed delete never loses a file. A receipt whose file is missing from the storage downloads as `404`. **Where files live:** a private S3-compatible bucket (Neon Object Storage) in every environment, with a separate bucket and credential for dev, test and production. There is no local-disk option: hosts like Render wipe local disks, and one code path everywhere means dev and tests exercise what production runs. The services only see the `ReceiptStorage` interface (`lib/storage/`), so the bucket provider can change without touching them. The bucket is never public: files are only reachable through `GET /receipts/:id`, after the claim-scope check. Every upload lands in a temp folder first for the type and size checks, is then uploaded to the bucket, and the temp copy is always removed. Receipts are listed on each line item of a claim response (`receipts`).
 - **Finance export.** `GET /finance/export?from=YYYY-MM-DD&to=YYYY-MM-DD` (finance only) downloads a CSV of approved claims. **The period is the final approval date (`approvedAt`), both days included, in UTC**; `from` and `to` are both required (so a forgotten `to` cannot export everything), and `from` later than `to` or a bad date is `400`. Only `APPROVED` claims are exported, never drafts, pending or rejected ones. One row per claim, oldest approval first: `claimNumber, claimId, title, claimantName, claimantEmail, submittedAt, approvedAt` (UTC ISO), `total` (the database `SUM` of the line items, 2 decimals) and `lineItemCount`. It never loads the period into memory: claims are read in batches of 1000 with keyset pagination (`WHERE (approvedAt, id) > cursor ORDER BY approvedAt, id LIMIT 1000`, served by the `Claim(status, approvedAt)` index), each batch picks its claims first and sums only those, and the rows are streamed to the client with backpressure (a slow client slows the reading, a client that leaves stops it). The CSV is encoded by `csv-stringify`: cells with commas, quotes or line breaks are quoted, a text cell starting with `=`, `+`, `-` or `@` gets a leading `'` so a spreadsheet cannot run it as a formula (CSV injection), and the file has a UTF-8 BOM and CRLF line ends so Excel opens it correctly. A failure after the download has started cuts the connection, so a short file is never mistaken for a complete one. Finance has read access only: every approve, reject, edit, submit and receipt route answers `403` to it.
 - **Status flow:** `DRAFT -> PENDING_APPROVAL -> APPROVED`, or `PENDING_APPROVAL -> REJECTED -> (edit, resubmit) -> PENDING_APPROVAL`. `APPROVED` is terminal and read-only.
 - **Approval routing (N levels):** the number of required levels comes from an ordered list of amount tiers in `lib/approvalPolicy.ts` (currently: from ₹0 level 1; from ₹10,000 levels 1 and 2). Each claimant has a fixed approver per level in `ApproverAssignment` (one row per claimant and level, set up by the seed because there is no admin UI). On submit, the chain is built by looping over `1..requiredLevels` and copying the claimant's assigned approver for each level onto an `Approval` row, so assignment changes later never affect claims already in flight. Adding a level 3 means one new tier in the policy plus assignment rows, with no schema change. If a claimant has no approver at a required level, submit fails with `422 NO_APPROVER_AVAILABLE`.
 - **Amount change during approval:** a claim awaiting approval can still be edited (line items or title). If an edit changes the **total**, every decision so far is void: the live approval rows (waiting, pending and already approved) become `INVALIDATED`, `chainVersion` goes up by one, and a new chain is built from level 1 for the new total. The approvers stay the same, because they come from the claimant's fixed assignments, so if Alice approved and Bob was pending, both are reset and Alice is asked again. The number of levels can change if the total crosses a tier (for example ₹9,000 to ₹12,000 adds level 2). An edit that leaves the total unchanged (a description, date, category or title change) does not reset anything, and neither does an edit to a draft or a rejected claim (a rejected claim has no live chain; resubmit builds a new one). Old approval rows are kept for audit, and every edit to a submitted claim is recorded in `ClaimHistory` (`CLAIM_UPDATED`, plus `APPROVAL_CHAIN_RESET` when the chain is rebuilt). A claim awaiting approval must keep at least one line item (`422 NO_LINE_ITEMS`); a draft or rejected claim may be emptied but cannot be submitted again until it has an item. An approved claim cannot be edited at all.
 - **Approving and rejecting:** an approver decides only their own step, and only while it is `PENDING` on the live chain (`GET /approvals` is the queue). Approve moves the next level to `PENDING`, or approves the claim when it was the last level. Reject needs a reason (`400` without one): the claim becomes `REJECTED`, earlier approvals stay, and the open steps become `INVALIDATED`. The claim row is locked before deciding, so a decision and a claimant edit never interleave, and a decision on a step voided by an edit is refused (`409 APPROVAL_NOT_PENDING`). Each decision writes `APPROVAL_GRANTED` or `CLAIM_REJECTED` (and `CLAIM_APPROVED` for the last level) in the same transaction.
 - **Rejection and resubmission:** a rejected claim goes back to the claimant with the reason (`lastRejection` on `GET /claims/:id`: reason, level, time and who rejected it). It stays editable but has no live chain, so edits never reset anything. `POST /claims/:id/resubmit` (only for a `REJECTED` claim, with at least one line item) starts a **new chain from level 1 with the same approvers** (one `chainVersion` higher) and moves the claim to `PENDING_APPROVAL`. Nothing is lost: the earlier approval rows, the rejection and its reason, the history and the original `submittedAt` all stay, and the resubmit is recorded as `CLAIM_RESUBMITTED`. `lastRejection` is kept after a resubmit and replaced if the claim is rejected again. Approvers come from the claimant's fixed assignments, so reassigning an approver between a rejection and the resubmit is out of scope for this POC.
-- **Approved claims are locked** in the service layer and by PostgreSQL triggers on line items and receipts.
+- **Approved claims are locked, in two layers** (defence in depth):
+  - **Service:** every edit (title, line items, receipts) and every delete, submit or resubmit first locks the claim row with `SELECT ... FOR UPDATE` (`lib/claimLock.ts`) and answers `409 CLAIM_LOCKED` if it is `APPROVED`. The row lock also stops an approval from committing halfway through an edit.
+  - **Database:** `BEFORE` triggers on `LineItem` and `Receipt` refuse any insert, update or delete under an approved claim, and a trigger on `Claim` refuses updating or deleting an approved claim row (so it cannot be reopened, for example by setting the status back to `DRAFT`). The triggers read the claim with `FOR SHARE`, so a concurrent approval waits for the edit instead of slipping in between the check and the write. They hold even for code that skips the service or SQL run by hand; their error is mapped to the same `409 CLAIM_LOCKED`. Migrations: `claim_lock_triggers` and `claim_lock_hardening`.
 - **Audit trail.** Every change to a submitted claim writes a `ClaimHistory` row in the same transaction as the change, so the row and the change are saved or rolled back together, and a refused change leaves no row. All writes go through one helper, `recordHistory(tx, ...)` in `lib/recordHistory.ts`, which the compiler only lets you call with a transaction client; nothing else writes to the table. Actions: `CLAIM_CREATED`, `CLAIM_SUBMITTED`, `CLAIM_RESUBMITTED`, `CLAIM_UPDATED` (with the old and new total), `APPROVAL_CHAIN_RESET`, `APPROVAL_GRANTED`, `CLAIM_APPROVED`, `CLAIM_REJECTED` (with the reason), `RECEIPT_ADDED` and `RECEIPT_REMOVED`. The only exceptions: edits to a draft (it was never submitted) and deleting a draft (its history goes with it; the deletion is only logged). `GET /claims/:id/history?page=&pageSize=` returns the trail oldest first, paginated, to anyone who may see the claim (same scope as `GET /claims/:id`; otherwise `404`), with the actor as a name and role only, never the email. `GET /claims/:id` also shows `approvals`: the live approval chain, one entry per level with its status, the approver's name and the decision time, so you can see who is holding the claim now. Chains voided by an edit or a rejection are not shown there; the full story, including earlier rounds, is in the history.
 - **Visibility is enforced in queries.** `claimScopeFor(user)` (one function in `lib/claimScope.ts`) returns the `where` for every claim read, so an out-of-scope claim is simply not found (`404`, never 403, so its existence is not revealed). A claimant sees their own claims; an approver sees claims where they have a `PENDING`, `APPROVED`, `REJECTED` or `INVALIDATED` step (a `WAITING` step stays hidden until their turn comes); finance sees all claims. Reads (`GET /claims`, `GET /claims/:id`) are open to all three roles within that scope; every write stays claimant-only. `GET /approvals` is the approver's to-do list (only steps they can decide now), while `GET /claims` is the read-only view of every claim they are involved in.
 - **Only drafts can be deleted.** A draft was never submitted, so `DELETE /claims/:id` removes it together with its line items and its own history. A submitted claim (pending, rejected or approved) is never deleted: its history and approvals are the audit trail finance may need in a dispute. Only the `title` of a claim can be edited (`PATCH /claims/:id`); the total is derived and the status follows the workflow.
@@ -54,10 +72,18 @@ Each user has one role. Approvers also have an `approvalLevel` (1 or 2).
 - Expected errors (our rules, 4xx) return their own code. Unexpected errors (bugs) always return a generic `500 INTERNAL_ERROR`; the message and stack trace appear only on that request's log line, never in the response.
 - On `SIGTERM` or `SIGINT` the server stops taking new requests, lets running ones finish, closes the database connection and exits (forced after 10 seconds). An unhandled rejection or uncaught exception is logged as `fatal`, then the process shuts down with exit code 1.
 
-## Error codes (so far)
+## Error codes
 
 | Case | Response |
 |---|---|
+| Body is not valid JSON | 400 `INVALID_JSON` |
+| Invalid input (body, query or params; unknown fields included) | 400 `VALIDATION_ERROR` with `details` |
+| Wrong email or password on login | 401 `INVALID_CREDENTIALS` |
+| No token, or an invalid or expired one | 401 `UNAUTHENTICATED` |
+| Role not allowed on this route (e.g. finance approving, a claimant exporting) | 403 `FORBIDDEN` |
+| Unknown route | 404 `NOT_FOUND` |
+| Too many requests (300 a minute per client; 10 failed logins per 15 minutes) | 429 `RATE_LIMITED` |
+| Unexpected server error (details only in the log) | 500 `INTERNAL_ERROR` |
 | Claim outside my visibility (or missing) | 404 `NOT_FOUND` |
 | Invalid list filter (bad `status` or date, `from` after `to`, unknown query field) | 400 `VALIDATION_ERROR` |
 | Approve/reject an approval that is not mine (or does not exist) | 404 `NOT_FOUND` (not 403, so its existence is not revealed) |
@@ -80,18 +106,30 @@ Each user has one role. Approvers also have an `approvalLevel` (1 or 2).
 ## Project layout
 
 ```
-backend/    Express API, Prisma schema, tests
+backend/    Express API, Prisma schema and migrations, seed, tests, Postman collection
 frontend/   Vue 3 app
 docker-compose.yml
 .github/workflows/ci.yml   CI (type-check and tests on pull requests)
-STEPS.md    Build plan
 ```
 
-## Setup (to be completed)
+## Setup
 
-1. Copy `backend/.env.example` to `backend/.env` and fill in the values (Neon `DATABASE_URL` (direct) and `DATABASE_URL_POOLED`, `JWT_SECRET`, etc.). Write values without quotes: `docker run --env-file` keeps quotes as part of the value. `STORAGE_DRIVER` (default `local`) chooses where receipts are stored: `local` uses `UPLOAD_DIR` (default `uploads`; in Docker a named volume so files survive restarts), `s3` uses an S3-compatible bucket and needs `S3_BUCKET`, `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (create a credential with the `storage:read` and `storage:write` scopes in Neon; read alone or write alone is not enough). Tests use the local driver. Scripts and tests run with `NODE_ENV=test` read `.env.test` instead (the Neon `test` branch).
+Needs Node 24, Docker (optional) and a Neon project with `dev` and `test` branches and a storage bucket for each.
+
+1. Copy `backend/.env.example` to `backend/.env` and fill in the values (Neon `DATABASE_URL` (direct) and `DATABASE_URL_POOLED`, `JWT_SECRET`, etc.). Write values without quotes: `docker run --env-file` keeps quotes as part of the value. Receipts need a bucket in every environment: `S3_BUCKET`, `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are required, and the API refuses to start without them. Use a separate bucket and credential for dev, test and production, each with the `storage:read` and `storage:write` scopes in Neon (read alone or write alone is not enough). Scripts and tests run with `NODE_ENV=test` read `.env.test` instead (the Neon `test` branch).
 2. For running the frontend outside Docker: copy `frontend/.env.example` to `frontend/.env` and set `VITE_API_URL=http://localhost:4000` (no quotes, no trailing slash). Docker does not need this file.
-3. `docker compose up --build` (see "Run with Docker" below)
+3. Either `docker compose up --build` (see "Run with Docker" below), or run the backend directly:
+
+   ```
+   cd backend
+   npm install
+   npx prisma generate          # the client is generated into src/generated, not committed
+   npx prisma migrate deploy    # creates the tables on the branch in backend/.env
+   npx prisma db seed           # the demo users (once; refuses to run in production)
+   npm run dev                  # http://localhost:4000
+   ```
+
+   With the API running outside production, the interactive API reference is at http://localhost:4000/docs (Swagger UI; the spec is `/openapi.json`). It is turned off in production.
 
 ## Run with Docker
 
@@ -107,8 +145,7 @@ WEB_PORT=8081 docker compose up --build         # web on another host port if 80
 - **First run on an empty database:** the container creates the tables, but users come from the seed, which is not run by the container. Run `npx prisma db seed` from `backend/` once (dev/test branches only; it refuses to run in production).
 - Settings come from `backend/.env` at run time and are never baked into the image (`.dockerignore` keeps `.env*` out of the build).
 - The container reports `healthy` in `docker compose ps` once `/health` answers.
-- The `receipts` named volume is mounted at `/app/uploads` and is used only with `STORAGE_DRIVER=local`. With `s3` it stays empty.
-- `docker compose down` removes the container and keeps the volume; `docker compose down -v` also deletes the volume.
+- Receipts go to the bucket in `backend/.env`, so the containers keep no state: `docker compose down` loses nothing.
 - **Frontend:** `VITE_API_URL` is the URL the *browser* uses to reach the API. Vite writes it into the JS bundle at build time, so it is a build argument (default `http://localhost:4000`) and a change needs `--build`; the build fails if it is empty.
 - The compose backend runs with `NODE_ENV=production`, so CORS allows only `CORS_ORIGIN`. Compose sets it to `http://localhost:${WEB_PORT}` for this local stack (overriding `backend/.env`), so the web container can call the API.
 - nginx serves `index.html` for any unknown path (SPA fallback, so a refresh on `/claims/123` works), caches the hashed `/assets/*` files for a year and `index.html` never, and adds `X-Frame-Options`, `X-Content-Type-Options` and `Referrer-Policy`. The frontend container is `healthy` once nginx serves `index.html`.
@@ -143,7 +180,7 @@ npm run build        # type-check + production build into dist/
 
 ## Running tests
 
-Vitest + Supertest against the Neon `test` branch (never dev or production). Needs Node 20+ (Node 24 is used in CI and Docker) and a `backend/.env.test` with the test branch settings.
+Vitest + Supertest against the Neon `test` branch (never dev or production). Needs Node 20+ (Node 24 is used in CI and Docker) and a `backend/.env.test` with the test branch settings and the test bucket.
 
 ```
 cd backend
@@ -163,9 +200,9 @@ merge into main            --> Render builds backend/Dockerfile and deploys it
 container start            --> prisma migrate deploy, then the API
 ```
 
-- **CI** (`.github/workflows/ci.yml`) runs on every pull request into `dev` or `main`. The tests use the Neon `test` branch through the repository secrets `TEST_DATABASE_URL_POOLED`, `TEST_JWT_SECRET` and `TEST_SEED_PASSWORD`.
+- **CI** (`.github/workflows/ci.yml`) runs on every pull request into `dev` or `main`. The tests use the Neon `test` branch and the test bucket through the repository secrets `TEST_DATABASE_URL_POOLED`, `TEST_JWT_SECRET`, `TEST_SEED_PASSWORD`, `TEST_AWS_ENDPOINT_URL_S3`, `TEST_AWS_REGION`, `TEST_AWS_ACCESS_KEY_ID`, `TEST_AWS_SECRET_ACCESS_KEY` and `TEST_S3_BUCKET`.
 - **Hosting:** Render web service (free tier) built from `backend/Dockerfile`, root directory `backend`, branch `main`, health check `/health`. Live API: https://expense-claims-and-reimbursement.onrender.com
-- **Production settings** are entered in Render's environment settings, never in a file: `DATABASE_URL`, `DATABASE_URL_POOLED`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `STORAGE_DRIVER=s3`, `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET`, and `CORS_ORIGIN` once the frontend has a URL. `NODE_ENV=production` is set in the image and Render sets `PORT`.
+- **Production settings** are entered in Render's environment settings, never in a file: `DATABASE_URL`, `DATABASE_URL_POOLED`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET`, and `CORS_ORIGIN` once the frontend has a URL. `NODE_ENV=production` is set in the image and Render sets `PORT`.
 - **Databases:** separate Neon branches per environment. `production` (the default branch) for the live app, `dev` for local work, `test` for the tests. The production bucket is private and has its own credential.
 - **Migrations** run on every container start (`prisma migrate deploy`), so a merged migration reaches production with the next deploy.
 - **Free tier caveat:** the service sleeps after 15 minutes without traffic; the first request after that takes about a minute.
@@ -194,13 +231,11 @@ npx tsx prisma/seed.ts
 unset DATABASE_URL_POOLED SEED_PASSWORD JWT_SECRET
 ```
 
-The seed upserts by email, so running it again changes nothing. `JWT_SECRET` is only there because the settings are validated on import; the seed does not use it.
+The seed upserts by email, so running it again changes nothing. `JWT_SECRET` is only there because the settings are validated on import; the seed does not use it. The same goes for the S3 settings, which are read from `backend/.env` when not exported (values in the shell always win).
 
 ### Postman
 
 The collection in `backend/postman/` has two environments: `Expense Claims - local` (`http://localhost:4000`) and `Expense Claims - production` (the Render URL). Set `password` in the environment you use; it is never committed. `baseUrl` must not end with `/`: `//auth/login` does not match the public login route and returns 401 `UNAUTHENTICATED`.
-
-Seeded logins, the finance export date definition and the full API reference will be added later.
 
 ## Out of scope
 
