@@ -4,7 +4,7 @@ import { AppError } from "./AppError";
 // Receipts must be small, and only these formats are accepted
 export const MAX_RECEIPT_BYTES = 5 * 1024 * 1024;
 
-// The file extension on disk comes from this list, never from the client's filename
+// The stored file's extension comes from this list, never from the client's filename
 export const RECEIPT_EXTENSIONS: Record<string, string> = {
   "application/pdf": ".pdf",
   "image/png": ".png",

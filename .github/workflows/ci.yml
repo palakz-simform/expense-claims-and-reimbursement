@@ -18,6 +18,12 @@ jobs:
       JWT_SECRET: ${{ secrets.TEST_JWT_SECRET }}
       DATABASE_URL_POOLED: ${{ secrets.TEST_DATABASE_URL_POOLED }}
       SEED_PASSWORD: ${{ secrets.TEST_SEED_PASSWORD }}
+      # Receipt storage is S3 only, and env.ts requires it at boot: the test bucket and its own credential
+      AWS_ENDPOINT_URL_S3: ${{ secrets.TEST_AWS_ENDPOINT_URL_S3 }}
+      AWS_REGION: ${{ secrets.TEST_AWS_REGION }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.TEST_AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.TEST_AWS_SECRET_ACCESS_KEY }}
+      S3_BUCKET: ${{ secrets.TEST_S3_BUCKET }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

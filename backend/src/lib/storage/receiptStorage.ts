@@ -1,7 +1,7 @@
 import type { Readable } from "node:stream";
 
-// Where receipt files live. The rest of the app only knows this interface, so moving from the local disk to
-// cloud storage (or back) is a setting, not a code change. Concept: storage abstraction (ports and adapters).
+// Where receipt files live. The rest of the app only knows this interface, so the S3 adapter can be replaced
+// (another provider, or a fake in tests) without touching the services. Concept: ports and adapters.
 export interface ReceiptStorage {
   // Store the already verified file at `tempPath` under `key`. The caller removes the temp file afterwards.
   save(key: string, tempPath: string, mimeType: string): Promise<void>;

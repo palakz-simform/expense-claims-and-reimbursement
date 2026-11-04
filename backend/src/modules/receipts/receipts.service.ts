@@ -67,7 +67,7 @@ export async function addReceipt(user: AuthUser, lineItemId: string, file: Expre
         throw new AppError(422, "RECEIPT_LIMIT_REACHED", `A line item can have at most ${MAX_RECEIPTS_PER_LINE_ITEM} receipts`);
       }
 
-      // The client's file name is stored only to show it back; the file on disk has its own random name
+      // The client's file name is stored only to show it back; the stored file has its own random name
       const receipt = await tx.receipt.create({
         data: {
           lineItemId,

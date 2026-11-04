@@ -465,7 +465,7 @@ export async function updateLineItem(user: AuthUser, claimId: string, itemId: st
 
 // Remove ONE line item from a claim
 export async function deleteLineItem(user: AuthUser, claimId: string, itemId: string) {
-  // Files of the item's receipts, removed from disk only after the transaction committed
+  // Files of the item's receipts, removed from storage only after the transaction committed
   const removedFiles: string[] = [];
 
   const claim = await runClaimEdit(user, claimId, async (tx, locked) => {
