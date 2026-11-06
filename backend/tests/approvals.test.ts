@@ -112,3 +112,30 @@ describe("the approval chain", () => {
     await reject(await pendingStepOf(claim.id, "ravi.l1"), "ravi.l1");
   });
 });
+
+describe("the approval queue's date filter", () => {
+  it("from/to are inclusive UTC days of the claim's submission, and from > to is refused", async () => {
+    const claim = await createClaimAs("asha.claimant", ["300.00"]);
+    await submit(claim.id);
+
+    // Pin the submission to a known moment late in the day, so the inclusive `to` day is really tested
+    await prisma.claim.update({ where: { id: claim.id }, data: { submittedAt: new Date("2020-03-15T23:30:00.000Z") } });
+    const queueIds = async (range: string) => {
+      const response = await api.get(`/approvals?pageSize=100&${range}`).set(await authAs("ravi.l1")).expect(200);
+      return response.body.data.map((a: { claim: { id: string } }) => a.claim.id);
+    };
+
+    // Inside the range (a single day): listed
+    expect(await queueIds("from=2020-03-15&to=2020-03-15")).toContain(claim.id);
+    // Range ends the day before, or starts the day after: not listed
+    expect(await queueIds("to=2020-03-14")).not.toContain(claim.id);
+    expect(await queueIds("from=2020-03-16")).not.toContain(claim.id);
+
+    // from later than to: 400 before any query runs
+    const backwards = await api.get("/approvals?from=2020-03-16&to=2020-03-15").set(await authAs("ravi.l1"));
+    expect(backwards.status).toBe(400);
+    expect(backwards.body.error.code).toBe("VALIDATION_ERROR");
+
+    await reject(await pendingStepOf(claim.id, "ravi.l1"), "ravi.l1");
+  });
+});
