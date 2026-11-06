@@ -75,4 +75,20 @@ describe("an approver cannot read a claim outside their queue", () => {
     // End the claim as rejected (an approved claim could never be cleaned up)
     await api.post(`/approvals/${await pendingStepOf(claim.id, "meera.l2")}/reject`).set(await authAs("meera.l2")).send({ reason: "test" }).expect(200);
   });
+
+  it("a level-2 step voided before its turn (level 1 rejected) does not reveal the claim", async () => {
+    const claim = await createClaimAs("asha.claimant", ["12000.00"]); // two levels
+    await api.post(`/claims/${claim.id}/submit`).set(await authAs("asha.claimant")).expect(200);
+
+    // Ravi rejects at level 1: Meera's step goes from WAITING to INVALIDATED without ever being her turn
+    await api.post(`/approvals/${await pendingStepOf(claim.id, "ravi.l1")}/reject`).set(await authAs("ravi.l1")).send({ reason: "test" }).expect(200);
+    const meerasStep = await prisma.approval.findFirstOrThrow({ where: { claimId: claim.id, level: 2 } });
+    expect(meerasStep.status).toBe("INVALIDATED");
+
+    // Still outside her scope: 404 by id, and missing from her claim list
+    await api.get(`/claims/${claim.id}`).set(await authAs("meera.l2")).expect(404);
+    const list = await api.get("/claims?pageSize=100").set(await authAs("meera.l2")).expect(200);
+    const listedIds = list.body.data.map((listed: { id: string }) => listed.id);
+    expect(listedIds).not.toContain(claim.id);
+  });
 });

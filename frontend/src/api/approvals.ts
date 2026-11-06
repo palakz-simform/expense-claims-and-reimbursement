@@ -1,9 +1,17 @@
 import { http } from './http'
 import type { ApprovalDecision, ApprovalQueueItem, Paginated } from '@/types/api'
 
+// GET /approvals filters (from/to are inclusive YYYY-MM-DD on the claim's submittedAt)
+export type ApprovalListQuery = {
+  page?: number
+  from?: string
+  to?: string
+}
+
 // GET /approvals: only the steps waiting for this approver, oldest submission first
-export async function listApprovals(page: number): Promise<Paginated<ApprovalQueueItem>> {
-  const params = { page }
+export async function listApprovals(
+  params: ApprovalListQuery,
+): Promise<Paginated<ApprovalQueueItem>> {
   const response = await http.get<Paginated<ApprovalQueueItem>>('/approvals', { params })
   return response.data
 }

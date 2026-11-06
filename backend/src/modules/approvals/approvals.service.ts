@@ -9,6 +9,9 @@ import { ApprovalStatus, ClaimStatus, Role } from "../../generated/prisma/enums"
 import type { AuthUser } from "../../types/express";
 import type { ListApprovalsQuery } from "./approvals.schemas";
 
+// Used to turn the inclusive `to` day into the start of the next day
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
 // Builds a claim's approval chain: one Approval row per required level (used by submit, reset and resubmit).
 // Runs inside the caller's transaction, so a level without a valid approver rolls everything back.
 export async function buildChain(
@@ -104,8 +107,15 @@ export async function resetChain(
 
 // The approver's queue: only steps waiting for MY decision now, oldest submission first (approverId is in the query).
 export async function listPendingApprovals(user: AuthUser, query: ListApprovalsQuery) {
-  const { page, pageSize } = query;
-  const where = { approverId: user.id, status: ApprovalStatus.PENDING };
+  const { page, pageSize, from, to } = query;
+
+  // `to` is an inclusive day, so the range ends before the next day starts
+  const dayAfterTo = to && new Date(to.getTime() + MS_PER_DAY);
+
+  // The date range filters on the claim's submittedAt, in the same SQL query (never in memory)
+  const hasDateFilter = Boolean(from || to);
+  const claimFilter = hasDateFilter ? { submittedAt: { gte: from, lt: dayAfterTo } } : undefined;
+  const where: Prisma.ApprovalWhereInput = { approverId: user.id, status: ApprovalStatus.PENDING, claim: claimFilter };
 
   // id is a tie-breaker so approvals of claims submitted at the same instant never repeat or vanish between pages
   const [approvals, totalItems] = await prisma.$transaction([
@@ -209,7 +219,9 @@ export async function approveApproval(user: AuthUser, approvalId: string) {
     });
 
     if (next) {
-      await tx.approval.updateMany({ where: { id: next.id, status: ApprovalStatus.WAITING }, data: { status: ApprovalStatus.PENDING } });
+      // One row, and it must be WAITING: `update` throws if it is not, so a broken chain rolls back (500) instead of
+      // leaving the claim pending with nobody whose turn it is
+      await tx.approval.update({ where: { id: next.id, status: ApprovalStatus.WAITING }, data: { status: ApprovalStatus.PENDING } });
     } else {
       // Last level approved: the claim is approved and locked from here on
       await tx.claim.update({ where: { id: claimId }, data: { status: ClaimStatus.APPROVED, approvedAt: decidedAt } });

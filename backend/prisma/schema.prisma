@@ -188,7 +188,7 @@ model ApproverAssignment {
   approver User @relation("AssignmentApprover", fields: [approverId], references: [id], onDelete: Restrict)
 
   @@unique([claimantId, level]) // exactly one approver per level per claimant; also serves lookups by claimant
-  @@index([approverId]) // find an approver's assignments (reassignment when an approver leaves)
+  @@index([approverId]) // foreign key index: Postgres does not add one, and the Restrict check on a User delete scans this column
 }
 
 // ---------------------------------------------------------------------------
