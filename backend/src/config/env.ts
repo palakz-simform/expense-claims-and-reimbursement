@@ -21,6 +21,10 @@ const envSchema = z.object({
   SEED_PASSWORD: z.string().min(8, "SEED_PASSWORD must be at least 8 characters").optional(),
   // Browser origins allowed to call the API in production, comma separated (e.g. https://app.example.com).
   // Unset or blank gives an empty list. Only production reads it; dev and tests stay open.
+  // How many reverse proxies sit in front of the API (Render: 1). Express then takes the client IP from that many
+  // X-Forwarded-For entries, so the rate limiters count per real user. 0 (local, no proxy) trusts no header at all,
+  // so a client cannot fake its IP. Concept: reverse proxy and client IP.
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(0),
   CORS_ORIGIN: z
     .string()
     .default("")

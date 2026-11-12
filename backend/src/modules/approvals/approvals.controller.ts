@@ -2,7 +2,7 @@ import type { Request, Response } from "express";
 import type { ListApprovalsQuery, RejectApprovalInput } from "./approvals.schemas";
 import * as approvalsService from "./approvals.service";
 
-// GET /approvals?page=&pageSize=: the approver's queue; req.user was set by authenticate
+// GET /approvals?page=&pageSize=&from=&to=: the approver's queue; req.user was set by authenticate
 export async function list(req: Request, res: Response) {
   const user = req.user!;
   const query = req.query as unknown as ListApprovalsQuery; // already validated and converted to numbers by validate()

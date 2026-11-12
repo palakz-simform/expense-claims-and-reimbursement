@@ -440,7 +440,7 @@ registry.registerPath({
   tags: ["Approvals"],
   summary: "Your approval queue: the steps waiting for YOUR decision now, oldest submission first (APPROVER only)",
   description:
-    "A level-2 step appears only after level 1 has approved. A step that was voided (the claim was edited or rejected) or already decided is not listed. You only ever see your own steps.",
+    "A level-2 step appears only after level 1 has approved. A step that was voided (the claim was edited or rejected) or already decided is not listed. You only ever see your own steps. Optional `from`/`to` (YYYY-MM-DD, inclusive, UTC) filter on the claim's submission date.",
   security: [{ [bearerAuth.name]: [] }],
   request: { query: listApprovalsQuerySchema },
   responses: {
@@ -460,7 +460,7 @@ registry.registerPath({
         },
       },
     },
-    400: errorResponse("VALIDATION_ERROR (page below 1, pageSize above 100, unknown query field)"),
+    400: errorResponse("VALIDATION_ERROR (page below 1, pageSize above 100, invalid date, from later than to, unknown query field)"),
     401: errorResponse("Missing, invalid or expired token"),
     403: errorResponse("Not an APPROVER"),
   },
