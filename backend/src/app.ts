@@ -15,6 +15,10 @@ import { receiptsRouter } from "./modules/receipts/receipts.routes";
 
 const app = express();
 
+// Behind a proxy (Render), every connection comes from the proxy: without this, all users would share one IP,
+// so one person's failed logins would rate-limit everyone. Must be set before any middleware reads req.ip.
+app.set("trust proxy", env.TRUST_PROXY_HOPS);
+
 // First of all: give the request an ID and log it when it finishes, so even requests that are
 // rejected later (rate limited, unauthenticated, invalid) are logged with their ID
 app.use(requestLogger);

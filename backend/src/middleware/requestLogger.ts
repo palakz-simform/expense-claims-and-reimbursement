@@ -1,11 +1,15 @@
 import { randomUUID } from "node:crypto";
+import type { Request, Response } from "express";
 import { pinoHttp } from "pino-http";
 import { logger } from "../lib/logger";
 
 // Gives every request an ID and writes ONE structured log line when the request finishes
 // (method, url, status, duration, request ID). Mount it first so every request is covered.
-export const requestLogger = pinoHttp({
+export const requestLogger = pinoHttp<Request, Response>({
   logger,
+
+  // The client IP as Express sees it (after `trust proxy`), so a rate-limited or abusive client can be traced
+  customProps: (req) => ({ ip: req.ip }),
 
   // Request ID (correlation ID): a fresh UUID per request, also sent back in the response header
   // so a user can quote it when reporting a problem.
