@@ -65,7 +65,8 @@ The two claimants have different approvers at every level, so an approver can be
 ## Logging and request IDs
 
 - Logs are structured JSON via `pino` (readable colours in development). `LOG_LEVEL` sets the minimum level (default `info`). Passwords, tokens and the `Authorization` header are redacted.
-- Every request gets a generated ID, returned in the `X-Request-Id` response header.
+- Every request gets a generated ID, returned in the `X-Request-Id` response header, and its log line carries the client `ip`.
+- **Client IP behind a proxy:** `TRUST_PROXY_HOPS` (default `0`) tells Express how many proxies sit in front of the API, so `req.ip` is the real client and the rate limits count per user, not per proxy. It is `0` locally (no proxy, so a client cannot fake its IP with `X-Forwarded-For`) and `1` on Render.
 - One log line per request when it finishes: method, URL, status, duration and request ID. Level follows the outcome: `info` (2xx/3xx), `warn` (4xx), `error` (5xx). `/health` is not logged.
 - Every error response has the same shape, `{ "error": { "code", "message", "requestId" } }`. `requestId` equals the `X-Request-Id` header, so a user can quote it and you can find that request's log line.
 - Invalid input (`400 VALIDATION_ERROR`) also has `details`: one `{ in, path, message }` per bad field (`in` is `body`, `query` or `params`), so a form can mark the right input. Schemas are `.strict()`, so unknown fields are rejected too.
@@ -202,7 +203,7 @@ container start            --> prisma migrate deploy, then the API
 
 - **CI** (`.github/workflows/ci.yml`) runs on every pull request into `dev` or `main`. The tests use the Neon `test` branch and the test bucket through the repository secrets `TEST_DATABASE_URL_POOLED`, `TEST_JWT_SECRET`, `TEST_SEED_PASSWORD`, `TEST_AWS_ENDPOINT_URL_S3`, `TEST_AWS_REGION`, `TEST_AWS_ACCESS_KEY_ID`, `TEST_AWS_SECRET_ACCESS_KEY` and `TEST_S3_BUCKET`.
 - **Hosting:** Render web service (free tier) built from `backend/Dockerfile`, root directory `backend`, branch `main`, health check `/health`. Live API: https://expense-claims-and-reimbursement.onrender.com
-- **Production settings** are entered in Render's environment settings, never in a file: `DATABASE_URL`, `DATABASE_URL_POOLED`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET`, and `CORS_ORIGIN` once the frontend has a URL. `NODE_ENV=production` is set in the image and Render sets `PORT`.
+- **Production settings** are entered in Render's environment settings, never in a file: `DATABASE_URL`, `DATABASE_URL_POOLED`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET`, `TRUST_PROXY_HOPS=1` (Render's proxy, so rate limits count per user), and `CORS_ORIGIN` once the frontend has a URL. `NODE_ENV=production` is set in the image and Render sets `PORT`.
 - **Databases:** separate Neon branches per environment. `production` (the default branch) for the live app, `dev` for local work, `test` for the tests. The production bucket is private and has its own credential.
 - **Migrations** run on every container start (`prisma migrate deploy`), so a merged migration reaches production with the next deploy.
 - **Free tier caveat:** the service sleeps after 15 minutes without traffic; the first request after that takes about a minute.
