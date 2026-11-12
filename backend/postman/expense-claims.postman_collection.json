@@ -1347,6 +1347,153 @@
           ]
         },
         {
+          "name": "Queue filtered by submitted date range",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/approvals?from=2000-01-01&to=2099-12-31&pageSize=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "approvals"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2000-01-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2099-12-31"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "100"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenApprover}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "from and to are inclusive UTC days of the claim's submittedAt. Needs {{claimId}} submitted in folder 4."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"The claim submitted earlier is in range\", function () { const ids = pm.response.json().data.map(function (a) { return a.claim.id; }); pm.expect(ids).to.include(pm.collectionVariables.get(\"claimId\")); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Queue filtered from a date in the future -> empty page",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/approvals?from=2099-01-01",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "approvals"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2099-01-01"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenApprover}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "No claim was submitted after this date, so the queue is empty."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"No approvals\", function () { const b = pm.response.json(); pm.expect(b.data).to.have.length(0); pm.expect(b.pagination.totalItems).to.eql(0); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Queue with from later than to -> 400",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/approvals?from=2026-02-01&to=2026-01-01",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "approvals"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-02-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-01-01"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{tokenApprover}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "The range is checked before any query runs."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"VALIDATION_ERROR on from\", function () { const e = pm.response.json().error; pm.expect(e.code).to.eql(\"VALIDATION_ERROR\"); pm.expect(e.details.map(function (d) { return d.path; })).to.include(\"from\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Approve my step of the claim",
           "request": {
             "method": "POST",

@@ -18,7 +18,21 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
-// Page number lives in the URL (?page=), so refresh and back keep it
+const inputClass =
+  'block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none'
+
+// ===== Filters live in the URL (?from=&to=&page=), so refresh and back keep them =====
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+
+// A date from the URL, or undefined if missing or malformed (the backend would reject it anyway)
+function queryDate(key: 'from' | 'to'): string | undefined {
+  const value = route.query[key]
+  const isValid = typeof value === 'string' && ISO_DATE.test(value)
+  return isValid ? value : undefined
+}
+const submittedFrom = computed(() => queryDate('from'))
+const submittedTo = computed(() => queryDate('to'))
+
 const page = computed({
   get: () => {
     const value = Number(route.query.page)
@@ -28,6 +42,33 @@ const page = computed({
     void router.replace({ query: { ...route.query, page: String(value) } })
   },
 })
+
+// The date inputs are edited locally and only applied on "Apply"
+const fromDraft = ref(submittedFrom.value ?? '')
+const toDraft = ref(submittedTo.value ?? '')
+
+// Keep the inputs in step when the URL changes without "Apply" (e.g. the nav link drops the filters)
+watch([submittedFrom, submittedTo], ([from, to]) => {
+  fromDraft.value = from ?? ''
+  toDraft.value = to ?? ''
+})
+
+// Changing the range starts again at page 1 (undefined keys are left out of the URL)
+function applyDates(): void {
+  const query = {
+    ...route.query,
+    from: fromDraft.value || undefined,
+    to: toDraft.value || undefined,
+    page: undefined,
+  }
+  void router.replace({ query })
+}
+
+function clearDates(): void {
+  fromDraft.value = ''
+  toDraft.value = ''
+  applyDates()
+}
 
 // --- Queue state ---
 const result = ref<Paginated<ApprovalQueueItem> | null>(null)
@@ -44,7 +85,8 @@ async function loadQueue(): Promise<void> {
   loadError.value = null
 
   try {
-    const data = await listApprovals(page.value)
+    const query = { page: page.value, from: submittedFrom.value, to: submittedTo.value }
+    const data = await listApprovals(query)
     if (requestId !== latestRequestId) {
       return
     }
@@ -66,8 +108,8 @@ async function loadQueue(): Promise<void> {
   }
 }
 
-// Reload when the page in the URL changes (and once on first load)
-watch(page, loadQueue, { immediate: true })
+// Reload whenever a filter or the page in the URL changes (and once on first load)
+watch(() => [submittedFrom.value, submittedTo.value, page.value], loadQueue, { immediate: true })
 
 // --- Decision feedback, shared by approve and reject ---
 const notice = ref<string | null>(null)
@@ -185,6 +227,32 @@ async function onReject(): Promise<void> {
     <CheckCircleIcon class="size-5 shrink-0" /> {{ notice }}
   </div>
   <ErrorAlert :error="decisionError" class="mb-4" />
+
+  <!-- Date range on the submission date -->
+  <form class="mb-4 flex flex-wrap items-end gap-2" @submit.prevent="applyDates">
+    <div>
+      <label for="queue-from" class="mb-1 block text-xs font-medium text-slate-600">
+        Submitted from
+      </label>
+      <input id="queue-from" v-model="fromDraft" type="date" :class="inputClass" />
+    </div>
+    <div>
+      <label for="queue-to" class="mb-1 block text-xs font-medium text-slate-600">
+        Submitted to
+      </label>
+      <input
+        id="queue-to"
+        v-model="toDraft"
+        type="date"
+        :min="fromDraft || undefined"
+        :class="inputClass"
+      />
+    </div>
+    <BaseButton type="submit" variant="secondary">Apply</BaseButton>
+    <BaseButton v-if="submittedFrom || submittedTo" variant="ghost" @click="clearDates">
+      Clear
+    </BaseButton>
+  </form>
   <ErrorAlert :error="loadError" class="mb-4" />
 
   <!-- Loading skeleton on the first load -->
@@ -207,7 +275,12 @@ async function onReject(): Promise<void> {
     </div>
 
     <EmptyState
-      v-if="result.data.length === 0"
+      v-if="result.data.length === 0 && (submittedFrom || submittedTo)"
+      title="No claims in this range"
+      description="Try another date range, or clear it to see the whole queue."
+    />
+    <EmptyState
+      v-else-if="result.data.length === 0"
       title="All caught up"
       description="No claims are waiting for your decision."
     />
