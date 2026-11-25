@@ -194,16 +194,16 @@ npm test
 
 ## CI and deployment
 
-**Which repository deploys:** the code lives in two repositories with the same contents. Render deploys only from the personal repository, https://github.com/palakz-simform/expense-claims-and-reimbursement. The organization copy runs CI on pull requests but is not connected to Render, so merging there deploys nothing. Render's link to the repository is set in the Render dashboard, not in this code.
+**Which repository deploys:** the code lives in two repositories with the same contents. Render deploys only from the personal repository, https://github.com/palakz-simform/expense-claims-and-reimbursement. The organization copy is code only: GitHub Actions are disabled there and it is not connected to Render, so nothing runs or deploys from it. Render's link to the repository is set in the Render dashboard, not in this code.
 
 ```
-pull request into dev/main --> GitHub Actions: npm ci, prisma generate, tsc --noEmit, npm test (both repositories)
+pull request into dev/main --> GitHub Actions: npm ci, prisma generate, tsc --noEmit, npm test (personal repository only)
 merge into main            --> Render builds backend/Dockerfile and deploys it (personal repository only)
                                Render builds frontend/ as a static site and deploys it
 container start            --> prisma migrate deploy, then the API
 ```
 
-- **CI** (`.github/workflows/ci.yml`) runs on every pull request into `dev` or `main`, in both repositories; each repository needs its own copy of the secrets below. The tests use the Neon `test` branch and the test bucket through the repository secrets `TEST_DATABASE_URL_POOLED`, `TEST_JWT_SECRET`, `TEST_SEED_PASSWORD`, `TEST_AWS_ENDPOINT_URL_S3`, `TEST_AWS_REGION`, `TEST_AWS_ACCESS_KEY_ID`, `TEST_AWS_SECRET_ACCESS_KEY` and `TEST_S3_BUCKET`.
+- **CI** (`.github/workflows/ci.yml`) runs on every pull request into `dev` or `main` in the personal repository (Actions are disabled in the organization copy, so the workflow file is kept but never runs there). The tests use the Neon `test` branch and the test bucket through the repository secrets `TEST_DATABASE_URL_POOLED`, `TEST_JWT_SECRET`, `TEST_SEED_PASSWORD`, `TEST_AWS_ENDPOINT_URL_S3`, `TEST_AWS_REGION`, `TEST_AWS_ACCESS_KEY_ID`, `TEST_AWS_SECRET_ACCESS_KEY` and `TEST_S3_BUCKET`.
 - **Hosting:** Render web service (free tier) built from `backend/Dockerfile`, root directory `backend`, branch `main`, health check `/health`. Live API: https://expense-claims-and-reimbursement.onrender.com
 - **Production settings** are entered in Render's environment settings, never in a file: `DATABASE_URL`, `DATABASE_URL_POOLED`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET`, `TRUST_PROXY_HOPS=1` (Render's proxy, so rate limits count per user), and `CORS_ORIGIN` once the frontend has a URL. `NODE_ENV=production` is set in the image and Render sets `PORT`.
 - **Databases:** separate Neon branches per environment. `production` (the default branch) for the live app, `dev` for local work, `test` for the tests. The production bucket is private and has its own credential.
