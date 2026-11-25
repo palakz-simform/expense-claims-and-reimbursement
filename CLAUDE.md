@@ -10,7 +10,7 @@ Detailed backend rules live in `backend/CLAUDE.md`. Domain rules (roles, status 
 - Database: PostgreSQL on Neon: `production` (the default branch, used by the live app), `dev` (local work) and `test` (tests), with `dev` and `test` as children of `production`
 - Auth: JWT issued by the backend, bcrypt password hashing
 - Files: Multer upload (temp folder for the type and size checks), then a private S3-compatible bucket (Neon Object Storage) behind a storage interface, one bucket per environment. Metadata in Postgres
-- Hosting: Render web service built from `backend/Dockerfile`, auto-deployed on merge to `main`; CI with GitHub Actions on pull requests
+- Hosting: Render web service built from `backend/Dockerfile`, auto-deployed on merge to `main` of the **personal** repository only. The organization copy of the repo runs CI but is not connected to Render. CI with GitHub Actions on pull requests in both
 - Frontend: Vue 3 (Vite, TS, Pinia). Deliberately minimal; the backend is the learning goal
 - Containers: Docker Compose for frontend and backend (no database container; Neon is hosted)
 
